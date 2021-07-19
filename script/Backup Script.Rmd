@@ -1,0 +1,345 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+```
+
+```{r}
+## Experiment to review data density and create cluster of pathology results
+
+```{r Creating Permutation Dataset for clustering, eval=FALSE, include=FALSE}
+# creating dataset of pathology test based on maximum observation period
+melted <- fread('phd1_melted_final.gz')
+for (i in seq_along(input$egfryears)){
+    dt <- melted[relyear >= 0 & relyear <= input$egfryears[i]]
+    file_name <- str_c('melted_relyear-', input$egfryears[i], '.gz', sep = '')
+    fwrite(dt, file = file_name)
+}
+
+# creating dataset of patients based on minimum eGFR test
+dt<- fread('meta.gz')
+dt[, htn := fifelse(htn == '', 'no', htn)]
+dt[, gn := fifelse(gn == '', 'no', gn)]
+dt[, dkd := fifelse(dkd == '', 'no', dkd)]
+dt[, transplant_date := NULL]
+
+for (j in seq_along(input$minegfrobs)){
+        m <- dt[egfr >= input$minegfrobs[j]]
+        dropped_cols <- c('birth.year', 'date.death', features, 'value_egfr_last', 
+                          'value_eskd', 'date_egfr_init', 'date_egfr_last', 'date_eskd',
+                          'cat1')
+        m <- m[, !..dropped_cols]
+        file_name <- str_c('egfr_freq-', input$minegfrobs[j], '.gz', sep = '')
+        fwrite(m, file_name)
+}
+
+```
+
+```{r Assessing cluster rel2_egfr2, eval=FALSE, include=FALSE}
+dt <- fread('melted_relyear-2.gz')
+egfr_freq2 <- fread('egfr_freq-2.gz')
+for (feature in features) {
+    m <- dt[test == feature]
+    obs <- m[, .N, by = id]
+    setnames(obs, old = 'N', new = feature)
+    setkey(obs, id)
+    egfr_freq2 <- obs[egfr_freq2]
+}
+
+dropped_cols <- c('id', 'htn', 'dkd', 'gn', 'gender', 'value_egfr_init', 'egfr.y',
+                  'eskd.y', 'age.init', 'death.y', 'cat2', 'cat3', 'cat4', 
+                  'cat5', 'cat6', 'cat7')
+egfr_freq2 <- egfr_freq2[, !..dropped_cols]
+egfr_freq2[is.na(egfr_freq2)] <- 0
+
+egfr_freq2_relyear2 <- as.matrix(egfr_freq2)
+my_breaks<-c(0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)
+heatmaply(x = t(egfr_freq2_relyear2), ylab = 'Features', xlab = 'Patients',
+                              dist_method = 'manhattan', hclust_method = 'ward.D2',
+                              Rowv = TRUE, Colv = TRUE, dendrogram = 'both', 
+          showticklabels = c(FALSE, TRUE), 
+          scale_fill_gradient_fun = scale_fill_viridis(trans='sqrt', breaks=my_breaks,
+                                                       labels=my_breaks, option = 'B', direction = -1,
+                                                       na.value='white')) 
+```
+
+```{r Analysis of cluster rel2_egfr2, eval=FALSE, include=FALSE}
+get_clust_tendency(t(egfr_freq2_relyear2), graph = FALSE, n = 61) # result: 0.879
+features_cluster <- agnes(x = t(egfr_freq2_relyear2), metric = 'manhattan', method = 'ward', stand = TRUE)
+coph_features <- cophenetic(features_cluster)
+distance_features <- dist(scale(t(egfr_freq2_relyear2)), method = 'manhattan')
+cor(coph_features, distance_features) # result: 0.77
+fviz_nbclust(t(egfr_freq2_relyear2), FUNcluster = pam, method = 'silhouette') # k: 3
+fviz_nbclust(t(egfr_freq2_relyear2), FUNcluster = pam, method = 'wss') # k: 3
+
+pam_feat_egfr_freq2_relyear2 <- pam(t(egfr_freq2_relyear2), 3, diss = FALSE, nstart =  25)
+```
+
+```{r Assessing cluster rel3_egfr2, eval=FALSE, include=FALSE}
+dt <- fread('melted_relyear-3.gz')
+egfr_freq2 <- fread('egfr_freq-2.gz')
+for (feature in features) {
+    m <- dt[test == feature]
+    obs <- m[, .N, by = id]
+    setnames(obs, old = 'N', new = feature)
+    setkey(obs, id)
+    egfr_freq2 <- obs[egfr_freq2]
+}
+
+dropped_cols <- c('id', 'htn', 'dkd', 'gn', 'gender', 'value_egfr_init', 'egfr.y',
+                  'eskd.y', 'age.init', 'death.y', 'cat2', 'cat3', 'cat4', 
+                  'cat5', 'cat6', 'cat7')
+egfr_freq2_relyear3 <- egfr_freq2[, !..dropped_cols]
+egfr_freq2_relyear3[is.na(egfr_freq2_relyear3)] <- 0
+
+egfr_freq2_relyear3 <- as.matrix(egfr_freq2_relyear3)
+my_breaks<-c(0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)
+heatmaply(x = t(egfr_freq2), ylab = 'Features', xlab = 'Patients',
+                              dist_method = 'manhattan', hclust_method = 'ward.D2',
+                              Rowv = TRUE, Colv = TRUE, dendrogram = 'both', 
+          showticklabels = c(FALSE, TRUE), 
+          scale_fill_gradient_fun = scale_fill_viridis(trans='sqrt', breaks=my_breaks,
+                                                       labels=my_breaks, option = 'B', direction = -1,
+                                                       na.value='white')) 
+```
+
+```{r Analysis of cluster rel3_egfr2, eval=FALSE, include=FALSE}
+get_clust_tendency(t(egfr_freq2_relyear3), graph = FALSE, n = 61) # result: 0.880
+features_cluster <- agnes(x = t(egfr_freq2_relyear3), metric = 'manhattan', method = 'ward', stand = TRUE)
+coph_features <- cophenetic(features_cluster)
+distance_features <- dist(scale(t(egfr_freq2_relyear3)), method = 'manhattan')
+cor(coph_features, distance_features) # result: 0.778
+fviz_nbclust(t(egfr_freq2_relyear3), FUNcluster = pam, method = 'silhouette') # k: 3
+fviz_nbclust(t(egfr_freq2_relyear3), FUNcluster = pam, method = 'wss') # k: 3
+
+pam_feat_egfr_freq2_relyear3 <- pam(t(egfr_freq2_relyear3), 3, diss = FALSE, nstart =  25)
+```
+
+```{r Experiment with other threshold, eval=FALSE, include=FALSE}
+dt <- fread('melted_relyear-3.gz')
+egfr_freq4 <- fread('egfr_freq-4.gz')
+for (feature in features) {
+    m <- dt[test == feature]
+    obs <- m[, .N, by = id]
+    setnames(obs, old = 'N', new = feature)
+    setkey(obs, id)
+    egfr_freq4 <- obs[egfr_freq4]
+}
+
+dropped_cols <- c('id', 'htn', 'dkd', 'gn', 'gender', 'value_egfr_init', 'egfr.y',
+                  'eskd.y', 'age.init', 'death.y', 'cat2', 'cat3', 'cat4', 
+                  'cat5', 'cat6', 'cat7')
+egfr_freq4_relyear3 <- egfr_freq4[, !..dropped_cols]
+egfr_freq4_relyear3[is.na(egfr_freq4_relyear3)] <- 0
+
+egfr_freq4_relyear3 <- as.matrix(egfr_freq4_relyear3)
+
+get_clust_tendency(t(egfr_freq4_relyear3), graph = FALSE, n = 61) # result: 0.897
+features_cluster <- agnes(x = t(egfr_freq4_relyear3), metric = 'manhattan', method = 'ward', stand = TRUE)
+coph_features <- cophenetic(features_cluster)
+distance_features <- dist(scale(t(egfr_freq4_relyear3)), method = 'manhattan')
+cor(coph_features, distance_features) # result: 0.79
+fviz_nbclust(t(egfr_freq4_relyear3), FUNcluster = pam, method = 'silhouette') # k: 3
+fviz_nbclust(t(egfr_freq4_relyear3), FUNcluster = pam, method = 'wss') # k: 3
+
+pam_feat_egfr_freq4_relyear3 <- pam(t(egfr_freq4_relyear3), 3, diss = FALSE, nstart =  25)
+
+dt <- fread('melted_relyear-2.gz')
+egfr_freq4 <- fread('egfr_freq-4.gz')
+for (feature in features) {
+    m <- dt[test == feature]
+    obs <- m[, .N, by = id]
+    setnames(obs, old = 'N', new = feature)
+    setkey(obs, id)
+    egfr_freq4 <- obs[egfr_freq4]
+}
+
+dropped_cols <- c('id', 'htn', 'dkd', 'gn', 'gender', 'value_egfr_init', 'egfr.y',
+                  'eskd.y', 'age.init', 'death.y', 'cat2', 'cat3', 'cat4', 
+                  'cat5', 'cat6', 'cat7')
+egfr_freq4_relyear2 <- egfr_freq4[, !..dropped_cols]
+egfr_freq4_relyear2[is.na(egfr_freq4_relyear2)] <- 0
+
+egfr_freq4_relyear2 <- as.matrix(egfr_freq4_relyear2)
+
+get_clust_tendency(t(egfr_freq4_relyear2), graph = FALSE, n = 61) # result: 0.894
+features_cluster <- agnes(x = t(egfr_freq4_relyear2), metric = 'manhattan', method = 'ward', stand = TRUE)
+coph_features <- cophenetic(features_cluster)
+distance_features <- dist(scale(t(egfr_freq4_relyear2)), method = 'manhattan')
+cor(coph_features, distance_features) # result: 0.782
+fviz_nbclust(t(egfr_freq4_relyear2), FUNcluster = pam, method = 'silhouette') # k: 3
+fviz_nbclust(t(egfr_freq4_relyear2), FUNcluster = pam, method = 'wss') # k: 3
+
+pam_feat_egfr_freq4_relyear2 <- pam(t(egfr_freq4_relyear2), 3, diss = FALSE, nstart =  25)
+
+dt <- fread('melted_relyear-4.gz')
+egfr_freq6 <- fread('egfr_freq-6.gz')
+for (feature in features) {
+    m <- dt[test == feature]
+    obs <- m[, .N, by = id]
+    setnames(obs, old = 'N', new = feature)
+    setkey(obs, id)
+    egfr_freq6 <- obs[egfr_freq6]
+}
+
+dropped_cols <- c('id', 'htn', 'dkd', 'gn', 'gender', 'value_egfr_init', 'egfr.y',
+                  'eskd.y', 'age.init', 'death.y', 'cat2', 'cat3', 'cat4', 
+                  'cat5', 'cat6', 'cat7')
+egfr_freq6_relyear4 <- egfr_freq6[, !..dropped_cols]
+egfr_freq6_relyear4[is.na(egfr_freq6_relyear4)] <- 0
+
+egfr_freq6_relyear4 <- as.matrix(egfr_freq6_relyear4)
+
+get_clust_tendency(t(egfr_freq6_relyear4), graph = FALSE, n = 61) # result: 0.88
+features_cluster <- agnes(x = t(egfr_freq6_relyear4), metric = 'manhattan', method = 'ward', stand = TRUE)
+coph_features <- cophenetic(features_cluster)
+distance_features <- dist(scale(t(egfr_freq6_relyear4)), method = 'manhattan')
+cor(coph_features, distance_features) # result: 0.80
+fviz_nbclust(t(egfr_freq6_relyear4), FUNcluster = pam, method = 'silhouette') # k: 3
+fviz_nbclust(t(egfr_freq6_relyear4), FUNcluster = pam, method = 'wss') # k: 3
+
+pam_feat_egfr_freq6_relyear4 <- pam(t(egfr_freq6_relyear4), 3, diss = FALSE, nstart =  25)
+```
+
+```{r Comparison of pathology clusters}
+cluster_result <- cbind(pam_feat_meta$clustering, pam_feat_egfr_freq2_relyear2$clustering,
+                        pam_feat_egfr_freq2_relyear3$clustering, pam_feat_egfr_freq4_relyear2$clustering,
+                        pam_feat_egfr_freq4_relyear3$clustering, pam_feat_egfr_freq6_relyear4$clustering)
+variables_names <- dimnames(cluster_result)[[1]]
+cluster_result_combined <- as.data.table(cbind(variables_names, cluster_result))
+setnames(cluster_result_combined, old = 'V2', new = 'meta')
+setnames(cluster_result_combined, old = 'V3', new = 'rel2_egfr2')
+setnames(cluster_result_combined, old = 'V4', new = 'rel3_egfr2')
+setnames(cluster_result_combined, old = 'V5', new = 'rel2_egfr4')
+setnames(cluster_result_combined, old = 'V6', new = 'rel3_egfr4')
+setnames(cluster_result_combined, old = 'V7', new = 'rel4_egfr6')
+cluster_result_combined
+```
+
+## Time featurisation (performed by Python)
+
+```{r Time featurisation files based on cluster comparison, eval=FALSE, include=FALSE}
+
+files <- c('melted_relyear-2', 'melted_relyear-3', 'melted_relyear-4')
+
+for (file in files){
+    dt <- fread(file = str_c(file, '.gz', sep = ''))
+    complete_dt <- dt[test %chin% complete_featurisation,]
+    file_name <- str_c(file, '_feat_complete.gz', sep = '')
+    fwrite(complete_dt, file = file_name)
+}
+
+for (file in files){
+    dt <- fread(file = str_c(file, '.gz', sep = ''))
+    next_dt <- dt[test %chin% next_featurisation,]
+    file_name <- str_c(file, '_feat_next.gz', sep = '')
+    fwrite(next_dt, file = file_name)
+}
+
+for (file in files){
+    dt <- fread(file = str_c(file, '.gz', sep = ''))
+    final_dt <- dt[test %chin% final_featurisation,]
+    file_name <- str_c(file, '_feat_final.gz', sep = '')
+    fwrite(final_dt, file = file_name)
+}
+```
+
+
+```{r Creating input, eval=FALSE, include=FALSE}
+
+dt <- fread('eff_feat_melted_relyear-2_feat_complete.gz')
+setnames(dt, old = 'V1', new = 'id')
+setkey(dt, 'id')
+
+aki <- fread('aki_relyear-2.gz')
+dt_aki <- dcast(aki, id ~ aki_stage, value.var = 'n')
+setnames(dt_aki, old = '1', new = 'aki_stage1')
+setnames(dt_aki, old = '2', new = 'aki_stage2')
+setnames(dt_aki, old = '3', new = 'aki_stage3')
+dt_aki[, severe_aki := fifelse((aki_stage2 >= 1) | (aki_stage3 >= 1), aki_stage2 + aki_stage3, 0)]
+dt_aki[, any_aki := fifelse(((severe_aki >= 1) | (aki_stage1 >= 1)), severe_aki + aki_stage1, 0)]
+dt_aki[, c('aki_stage1', 'aki_stage2', 'aki_stage3') := NULL]
+setkey(dt_aki, id)
+
+dt_egfr <- fread('egfr_freq-2.gz')
+setnames(dt_egfr, old = 'cat2', new = 'eskd_intraining')
+setnames(dt_egfr, old = 'cat4', new = 'eskd_2y')
+setnames(dt_egfr, old = 'cat7', new = 'eskd_5y')
+dt_egfr[, c('cat3', 'cat5', 'cat6', 'cat8', 'cat9') := NULL]
+setcolorder(dt_egfr, c('id', 'htn', 'dkd', 'gn', 'gender', 'value_egfr_init', 
+                       'age.init', 'egfr.y', 'eskd.y', 'death.y', 'eskd_intraining',
+                       'eskd_2y', 'eskd_5y'))
+setkey(dt_egfr, 'id')
+
+dt_combined <- dt_aki[dt_egfr]
+dt_combined[, severe_aki := fifelse(is.na(severe_aki), 0, severe_aki)]
+dt_combined[, any_aki := fifelse(is.na(any_aki), 0, any_aki)]
+dt_combined <- dt[dt_combined]
+file_name <- str_c('train_ready_eff_', input$egfryears[1], '_', input$minegfrobs[1], 
+                   '.gz', sep = '')
+
+fwrite(dt_combined, file = file_name)
+
+files <- list('egfr_freq-2.gz','egfr_freq-4.gz', 'egfr_freq-6.gz', 'egfr_freq-9.gz','egfr_freq-12.gz')
+
+for (i in 1:5){
+    dt_egfr <- fread(files[[i]])
+    setnames(dt_egfr, old = 'cat2', new = 'eskd_intraining')
+    setnames(dt_egfr, old = 'cat4', new = 'eskd_2y')
+    setnames(dt_egfr, old = 'cat7', new = 'eskd_5y')
+    dt_egfr[, c('cat3', 'cat5', 'cat6', 'cat8', 'cat9') := NULL]
+    setcolorder(dt_egfr, c('id', 'htn', 'dkd', 'gn', 'gender', 'value_egfr_init', 
+                       'age.init', 'egfr.y', 'eskd.y', 'death.y', 'eskd_intraining',
+                       'eskd_2y', 'eskd_5y'))
+    setkey(dt_egfr, 'id')
+    dt_combined <- dt_aki[dt_egfr]
+    dt_combined[, severe_aki := fifelse(is.na(severe_aki), 0, severe_aki)]
+    dt_combined[, any_aki := fifelse(is.na(any_aki), 0, any_aki)]
+    dt_combined <- dt[dt_combined]
+    file_name <- str_c('train_ready_eff_', input$egfryears[1], '_', input$minegfrobs[i], 
+                   '.gz', sep = '')
+    fwrite(dt_combined, file = file_name)
+}
+```
+
+```{r Different Input Permutation, include=FALSE, eval=FALSE}
+dt <- fread('eff_feat_melted_relyear-3_feat_complete.gz')
+setnames(dt, old = 'V1', new = 'id')
+setkey(dt, 'id')
+
+aki <- fread('aki_relyear-3.gz')
+dt_aki <- dcast(aki, id ~ aki_stage, value.var = 'n')
+setnames(dt_aki, old = '1', new = 'aki_stage1')
+setnames(dt_aki, old = '2', new = 'aki_stage2')
+setnames(dt_aki, old = '3', new = 'aki_stage3')
+dt_aki[, severe_aki := fifelse((aki_stage2 >= 1) | (aki_stage3 >= 1), aki_stage2 + aki_stage3, 0)]
+dt_aki[, any_aki := fifelse(((severe_aki >= 1) | (aki_stage1 >= 1)), severe_aki + aki_stage1, 0)]
+dt_aki[, c('aki_stage1', 'aki_stage2', 'aki_stage3') := NULL]
+setkey(dt_aki, id)
+
+files <- list('egfr_freq-2.gz','egfr_freq-4.gz', 'egfr_freq-6.gz', 'egfr_freq-9.gz', 'egfr_freq-12.gz')
+
+for (i in 1:5){
+    dt_egfr <- fread(files[[i]])
+    setnames(dt_egfr, old = 'cat3', new = 'eskd_intraining')
+    setnames(dt_egfr, old = 'cat5', new = 'eskd_2y')
+    setnames(dt_egfr, old = 'cat8', new = 'eskd_5y')
+    dt_egfr[, c('cat2', 'cat4', 'cat6', 'cat7', 'cat9') := NULL]
+    setcolorder(dt_egfr, c('id', 'htn', 'dkd', 'gn', 'gender', 'value_egfr_init', 
+                       'age.init', 'egfr.y', 'eskd.y', 'death.y', 'eskd_intraining',
+                       'eskd_2y', 'eskd_5y'))
+    setkey(dt_egfr, 'id')
+    dt_combined <- dt_aki[dt_egfr]
+    dt_combined[, severe_aki := fifelse(is.na(severe_aki), 0, severe_aki)]
+    dt_combined[, any_aki := fifelse(is.na(any_aki), 0, any_aki)]
+    dt_combined <- dt[dt_combined]
+    file_name <- str_c('train_ready_eff_', input$egfryears[2], '_', input$minegfrobs[i], 
+                   '.gz', sep = '')
+    fwrite(dt_combined, file = file_name)
+}
+```
+```
+
