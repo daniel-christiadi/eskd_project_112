@@ -30,7 +30,7 @@ features <<- c('height', 'weight', 'bmi', 'sit_dia', 'sit_sys', 'sit_hr', 'sta_d
                'egfr', 'urate', 'urea', 'ureacreat_ratio', 'crp', 'esr', 'protcreat_ratio',
                'timedprotein', 'albcreat_ratio')
 
-setwd('C:/Users/dchri/Documents/Projects/PhD Project 1/')
+setwd('/mnt/home/jupyter-dchristiadi85/PhD Project 1/data')
 
 primary_cluster <- c('crp', 'ureacreat_ratio', 'urea', 'egfr', 'creatinine', 'protein', 'globulin',
                      'bilirubin', 'ggt', 'albumin', 'alt', 'bicarbonate', 'chloride', 'potassium',
