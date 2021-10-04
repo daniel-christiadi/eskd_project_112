@@ -4,3 +4,8 @@
 .Ruserdata
 data
 dask-worker-space
+*.gz
+
+ML for ESKD/*.gz
+ML for ESKD/*.xlsx
+ML for ESKD/*.tsv
