@@ -5,6 +5,7 @@
 data
 dask-worker-space
 *.gz
+*.RDS
 
 ML for ESKD/*.gz
 ML for ESKD/*.xlsx

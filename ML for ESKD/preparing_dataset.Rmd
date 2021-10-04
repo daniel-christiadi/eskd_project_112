@@ -1,0 +1,849 @@
+---
+title: "Preparing_dataset"
+author: "Daniel Christiadi"
+date: "04/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
+libraries <- c('readxl', 'tidyverse', 'factoextra', 'cluster', 'dendextend', 
+               'ggExtra', 'patchwork','fasttime', 'broom', 'outliers', 'skimr', 
+               'plotly', 'heatmaply', 'shiny', 'iml', 'data.table', 'reticulate',
+               'gt', 'gtsummary')
+installed <- installed.packages()[,'Package']
+new.libs <- libraries[!(libraries %in% installed)]
+if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
+                                      dependencies=TRUE)
+lib.ok <- sapply(libraries, require, character.only=TRUE)
+thresh_chisq <<- 0.999999999
+
+features <<- c('height', 'weight', 'bmi', 'sit_dia', 'sit_sys', 'sit_hr', 
+               'sta_dia', 'sta_sys', 'sta_hr', 'diff_dia', 'diff_sys', 
+               'diff_hr', 'glucose', 'hba1c', 'haemoglobin', 'haematocrit', 
+               'rbc', 'rdw', 'mch', 'mchc', 'mcv', 'wcc', 'neutrophils', 
+               'lymphocytes', 'eosinophils', 'monocytes', 'basophils', 
+               'platelet', 'ferritin', 'iron', 'transferrin', 'tsat', 'calcium',
+               'phosphate', 'pth', 'caphos_product', 'alkphos', 'magnesium', 
+               'sodium', 'potassium', 'chloride', 'bicarbonate', 'alt', 
+               'albumin', 'ggt', 'bilirubin', 'globulin', 'protein', 
+               'cholesterol', 'triglycerides', 'ldl', 'hdl', 'tsh', 
+               'creatinine', 'egfr', 'urate', 'urea', 'crp', 
+               'esr', 'protcreat_ratio', 'timedprotein', 'albcreat_ratio')
+
+use_condaenv(condaenv = 'ml_dl')
+source('PhD Project 1 Function.R')
+```
+
+```{r Parsing raw data, include=FALSE, eval=FALSE}
+lab_results <- fread(file = 'parsed_labresults.tsv', 
+                     sep = '\t')
+
+setnames(lab_results, 'PatientObjectID', 'id')
+setnames(lab_results, 'Date_Local', 'date')
+setnames(lab_results, 'ResultName', 'test1')
+setnames(lab_results, 'OtherResultName', 'test2')
+setnames(lab_results, 'Result', 'value')
+setnames(lab_results, 'Units', 'unit1')
+setnames(lab_results, 'OtherUnits', 'unit2')
+
+pathology <- lab_results %>% 
+    select(id, date, test1, test2, value, unit1, unit2) %>% 
+    mutate(test = case_when(test1 == 'Other' ~ test2,
+                            TRUE ~ test1)) %>% 
+    mutate(unit = case_when(is.na(unit1) ~ unit2,
+                            TRUE ~ unit1)) %>% 
+    select(id, date, test, value, unit) %>% 
+    mutate(value = parse_number(value))
+
+# fwrite(pathology, file = 'pathology.gz')
+```
+
+```{r Extracting pathology data, include=FALSE}
+pathology <- fread('pathology.gz')
+
+# test name Glucose in mmol/L, serum and HgbA1c (Serum) in %
+glucose <- pathology %>% 
+    filter(test %in% c('Glucose, serum', 'Glucose')) %>% 
+    select(id:value)
+
+glucose$test <- 'glucose'
+
+hba1c <- pathology %>% 
+    filter(test == 'HgbA1c (Serum)') %>% 
+    filter(value < 30) %>% # removed unrealistic result with no unit n = 2 
+    select(id:value)
+
+hba1c$test <- 'hba1c'
+
+# creating diagnosis of diabetes based on random serum glucose >= 11.1 mmol/L and HbA1C > 6.5%
+dt <- glucose %>% 
+    mutate(diagnosis = case_when(value >= 11.1 ~ 'dkd',
+                                 TRUE ~ 'no')) %>% 
+    filter(diagnosis == 'dkd') %>% 
+    distinct(across(c(id, diagnosis)))
+
+dt2 <- hba1c %>% 
+    mutate(diagnosis = case_when(value >= 6.5 ~ 'dkd',
+                                 TRUE ~ 'no')) %>% 
+    filter(diagnosis == 'dkd') %>% 
+    distinct(across(c(id, diagnosis)))
+
+dt3 <- pathology %>% 
+    filter(test == '2Hr Glucose') %>% 
+    mutate(diagnosis = case_when(value >= 11.1 ~ 'dkd',
+                                 TRUE ~ 'no')) %>% 
+    filter(diagnosis == 'dkd') %>% 
+    distinct(across(c(id, diagnosis)))
+
+dkd <- rbind(dt, dt2, dt3) %>% 
+    distinct(across(c(id, diagnosis))) 
+
+setnames(dkd, old = 'diagnosis', new = 'dkd')
+rm(dt, dt2, dt3)
+
+# test name Haemoglobin (g/L)
+hb <- pathology %>% 
+    filter(test %in% c('Haemoglobin','HAEMOGLOBIN')) %>% 
+    filter(value <= 300) %>% # removing unrealistic Hb = 1187 g/L
+    select(id:value)
+
+hb[id == 19924 & value == 12.3]$value <- 123
+hb$test <- 'haemoglobin'
+
+# test name Haematocrit (%) : Haematocrit can be calculated (RBC*MCV)/10
+hct <- pathology %>% 
+    filter(test %in% c('Hct', 'Haematocrit')) %>% 
+    select(id:value)
+
+hct$test <- 'haematocrit'
+
+# test name Red Blood Cell Count in x10^12/L
+rbc <- pathology %>% 
+    filter(test == 'Red Blood Cell Count') %>% 
+    select(id:value)
+
+rbc$test <- 'rbc'
+
+# test name Red Cell Distribution Width. (%)
+rdw <- pathology %>% 
+    filter(test == 'Red Cell Distribution Width.') %>% 
+    select(id:value)
+
+rdw$test <- 'rdw'
+
+# test name MCH in pg - MCH is calculated Hb (g/L) divided by RBC(in millions/microL)
+mch <- pathology %>% 
+    filter(test %in% c('Mean Corp. Haem.', 'MCH')) %>% 
+    select(id:value)
+
+mch$test <- 'mch'
+
+# test name MCHC in g/L -  MCHC is calculated by Hb / Hct
+mchc <- pathology %>% 
+    filter(test == 'MCHC') %>% 
+    select(id:value)
+
+mchc$test <- 'mchc'
+
+# test name MCV if fL
+mcv <- pathology %>% 
+    filter(test %in% c('Mean Cell Volume', 'MCV')) %>% 
+    select(id:value)
+
+mcv$test <- 'mcv'
+
+# test name White Blood Cell Count in 10^9/L
+wcc <- pathology %>% 
+    filter(test %in% c('White Cell Count', 'White Blood Cell Count')) %>% 
+    select(id:value)
+
+wcc$test <- 'wcc'
+
+# test name Actual Neutrophils (10^9/L)
+neut <- pathology %>% 
+    filter(test %in% c('Total Neuts', 'Actual Neutrophils')) %>% 
+    select(id:value)
+
+neut$test <- 'neutrophils'
+
+# test name Actual Lymphocytes (10^9/L)
+lymph <- pathology %>% 
+    filter(test %in% c('Lymphocytes', 'Actual Lymphocytes'))
+
+# changing unit x10^6/L to x10^9/L n = 2
+lymph <- lymph %>% 
+    mutate(value = case_when(unit %in% c('x10*6/L', 'x10^6/L') ~ value/1000,
+                             TRUE ~ value))
+lymph[unit == "%"]$value <- NA
+
+lymph <- lymph %>% 
+    select(id:value) 
+
+lymph$test <- 'lymphocytes'
+
+# test name Actual Eosinophils (10^9/L)
+eosin <- pathology %>% 
+    filter(test == 'Actual Eosinophils') %>% 
+    select(id:value)
+
+eosin$test <- 'eosinophils'
+
+# test name Actual Monocytes (10^9/L)
+monocyte <- pathology %>% 
+    filter(test == 'Actual Monocytes') %>% 
+    select(id:value)
+
+monocyte$test <- 'monocytes'
+
+# test name Actual Basophils (10^9/L)
+baso <- pathology %>% 
+    filter(test == 'Actual Basophils') %>% 
+    select(id:value)
+
+baso$test <- 'basophils'
+
+# test name Platelet Count (10^9/L)
+platelet <- pathology %>% 
+    filter(test %in% c('Platelets', 'Platelet Count')) %>% 
+    select(id:value)
+
+platelet$test <- 'platelet'
+
+# test name Ferritin (Serum) (microg/L)
+ferritin <- pathology %>% 
+    filter(test == 'Ferritin (Serum)') %>% 
+    select(id:value) %>% 
+    filter(value <= 40000) # removal of likely data error n = 4
+
+ferritin$test <- 'ferritin'
+
+# test name Iron (Serum) in umol/L
+iron <- pathology %>% 
+    filter(test == 'Iron (Serum)') %>% 
+    select(id:value)
+
+iron$test <- 'iron'
+
+# test name Transferrin (Serum) in umol/ - conversion rate from g/L to umol/L is 12.5628
+transferrin <- pathology %>% 
+    filter(test == 'Transferrin (Serum)') %>% 
+    mutate(value = case_when(unit %in% c('g/l', 'g/L') ~ value*12.5628,
+                             TRUE ~ value)) %>% 
+    select(id:value)
+
+transferrin$test <- 'transferrin'
+
+# test name Transferrin Saturation (Serum) (%)
+tsat <- pathology %>% 
+    filter(test == 'Transferrin Saturation (Serum)') %>% 
+    select(id:value)
+
+tsat$test <- 'tsat'
+
+# test name Ca, adj; Calcium, serum; (mmol/L)
+ca <- pathology %>% 
+    filter(test %in% c('Ca, adj')) %>% 
+    select(id:value)
+
+ca$test <- 'calcium'
+
+# test name Phosphorus, serum (mmol/L)
+phosph <- pathology %>% 
+    filter(test == 'Phosphorus, serum')
+
+phosph[unit == '1.58']$value <- 1.58 # salvaging data n = 1
+
+phosph <- phosph %>% 
+    select(id:value) 
+
+phosph$test <- 'phosphate'
+
+# test name Cax Phos, adj | Calcium Phosphorus product
+# dt <- pathology %>% filter(test == 'Cax Phos, adj' | test == 'Calcium Phosphorus product')
+dt <- bind_rows(ca, phosph) %>% 
+    pivot_wider(id_cols = c(id,date), 
+                names_from = test,
+                values_from = value, 
+                values_fn = mean)
+
+caphosproduct <- dt %>% 
+    mutate(value = calcium*phosphate) %>%
+    mutate(test = "caphosproduct") %>% 
+    select(id, date, test, value)
+
+# test name PTH Intact in pmol/L
+pth <- pathology %>% 
+    filter(test %in% c('Intact PTH', 'PTH Intact')) %>% 
+    mutate(value = case_when(unit == 'pg/ml' ~ value*0.106,
+                             TRUE ~ value)) %>% 
+    select(id:value)
+
+pth$test <- 'pth'
+
+# test name Alkaline Phosphatase (Serum) in U/L
+alkphos <- pathology %>% 
+    filter(test %in% c('Alkaline Phosphatase (Serum)', 'Alk. Phos.', 'ALKP')) %>%
+    select(id:value)
+
+alkphos$test <- 'alkphos'
+
+# test name Magnesium (Serum) in mmol/L
+mg <- pathology %>% 
+    filter(test %in% c('Magnesium', 'Magnesium (Serum)')) %>% 
+    filter(value <= 10) # removed n = 6 values with no unit with unrealistic mg level > 80
+
+mg[unit == 'mmol/day']$value <- NA # remove incorrect unit
+
+mg <- mg %>% 
+    select(id:value) 
+
+mg$test <- 'magnesium'
+
+# test name Sodium, serum in mmol/L
+sodium <- pathology %>% 
+    filter(test %in% c('Sodium', 'Sodium, serum')) %>% 
+    filter(value != 5.8, value != 1238) %>%  # removal n = 2 values with unrealistic Na level 5.8 and 1238
+    select(id:value) 
+
+sodium$test <- 'sodium'
+
+# test name Potassium, serum in mmol/L
+potassium <- pathology %>% 
+    filter(test %in% c('Potassium', 'Potassium, serum')) %>% 
+    filter(value <= 10) %>%  # removal n = 5 values with unrealistic K level > 10
+    select(id:value) 
+
+potassium$test <- 'potassium'
+
+# test name Chloride, serum in mmol/L
+chloride <- pathology %>% 
+    filter(test %in% c('Chloride, serum', 'Chloride')) %>% 
+    filter(value > 70) # removal n = 9 values with unrealistic level < 20
+
+chloride[unit == 'mmol/day']$value <- NA
+
+chloride <- chloride %>% 
+    select(id:value)
+
+chloride$test <- 'chloride'
+
+# test name Bicarbonate (Serum) in mmol/L
+bicarb <- pathology %>% 
+    filter(test %in% c('HCO3 (mEQ/L)', 'Bicarbonate (Serum)')) %>% 
+    select(id:value)
+
+bicarb$test <- 'bicarbonate'
+
+# test name Alanine Aminotransferase in U/L
+alt <- pathology %>% 
+    filter(test == 'Alanine Aminotransferase') %>% 
+    select(id:value)
+
+alt$test <- 'alt'
+
+# test name Albumin (Serum) in g/L
+alb <- pathology %>% 
+    filter(test == 'Albumin (Serum)') %>% 
+    select(id:value) %>% 
+    filter(value %>% between(10, 80)) # removed further n = 3 unrealistic value alb < 5 g/L and > 100
+
+alb$test <- 'albumin'
+
+# test name Gamma Glutamyl Transferase (Serum) in U/L
+ggt <- pathology %>% 
+    filter(test == 'Gamma Glutamyl Transferase (Serum)') %>% 
+    select(id:value)
+
+ggt$test <- 'ggt'
+
+# test name Bilirubin Total (Serum) in umol/L
+bili <- pathology %>% 
+    filter(test == 'Bilirubin Total (Serum)') %>% 
+    select(id:value) 
+
+bili$test <- 'bilirubin'
+
+# test name Globulin (Serum) in g/L
+globulin <- pathology %>% 
+    filter(test == 'Globulin (Serum)') %>% 
+    select(id:value)
+
+globulin$test <- 'globulin'
+
+# test name Protein (Serum) in g/L
+protein <- pathology %>% 
+    filter(test %in% c('Protein (Serum)','Total Protein')) %>% 
+    select(id:value)
+
+protein$test <- 'protein'
+
+# test name Cholesterol (Serum) in mmol/L
+cholesterol <- pathology %>% 
+    filter(test == 'Cholesterol (Serum)') %>% 
+    select(id:value)
+
+cholesterol$test <- 'cholesterol'
+
+# test name Triglycerides (Serum) in mmol/L
+tg <- pathology %>% 
+    filter(test == 'Triglycerides (Serum)') %>% 
+    select(id:value)
+
+tg$test <- 'triglycerides'
+
+# test name Low Density Lipoprotein (Serum) in mmol/L
+ldl <- pathology %>% 
+    filter(test == 'Low Density Lipoprotein (Serum)') %>% 
+    select(id:value)
+
+ldl$test <- 'ldl'
+
+# test name High Density Lipoprotein (Serum) in mmol/L
+hdl <- pathology %>% 
+    filter(test == 'High Density Lipoprotein (Serum)') %>% 
+    select(id:value)
+
+hdl$test <- 'hdl'
+
+# test name 'Thyroid Stimulating Hormone in mIU/L
+tsh <- pathology %>% 
+    filter(test == 'Thyroid Stimulating Hormone') %>% 
+    select(id:value)
+
+tsh$test <- 'tsh'
+
+# test name Creatinine (Serum) in umol/L
+creatinine <- pathology %>% 
+    filter(test == 'Creatinine (Serum)') %>% 
+    mutate(value = case_when(
+        (unit == 'mmol/L' & value <= 10) ~ value*1000,
+        TRUE ~ value
+    )) %>% 
+    select(id:value)
+
+creatinine$test <- 'creatinine'
+
+# test name eGFR mL/min/1.73m2
+egfr <- pathology %>% 
+    filter(test == 'eGFR') %>% 
+    filter(value <= 300) %>% # excluding n = 60 with unrealistic egfr value > 300
+    select(id:value)
+
+egfr$test <- 'egfr'
+
+# test name Urate in umol/L
+urate <- pathology %>% 
+    filter(test %in% c('Urate', 'Uric Acid (Serum)')) %>% 
+    mutate(value = case_when(
+        unit %in% c('mmol/l', 'mmol/L') ~ value*1000,
+        value < 10 ~ value*1000,
+        TRUE ~ value
+    )) %>% 
+    select(id:value)
+
+urate$test <- 'urate'
+
+# test name Urea (serum) in mmol/L
+urea <- pathology %>% 
+    filter(test == 'Urea (serum)') %>% 
+    select(id:value)
+
+urea$test <- 'urea'
+
+# test name C-Reactive Protein in mg/L
+crp <- pathology %>% 
+    filter(test %in% c('CRP', 'C-Reactive Protein')) %>% 
+    select(id:value)
+
+crp$test <- 'crp'
+
+# test name Erythrocyte Sedimentation Rate in mm/hr
+esr <- pathology %>% 
+    filter(test %in% c('ESR', 'Erythrocyte Sedimentation Rate')) %>% 
+    select(id:value)
+
+esr$test <- 'esr'
+
+# test name Protein/Creatinine Ratio and Protein Creatinine Ratio (Urine)
+protcreat <- pathology %>% 
+    filter(test %in% c('Protein/creatinine', 'Protein/Creatinine', 
+                       'Protein/Creatinine Ratio',
+                       'Protein Creatinine Ratio (Urine)')) %>% 
+    mutate(value = case_when(
+        unit == 'g/g' ~ value*100,
+        TRUE ~ value
+    )) %>% 
+    select(id:value)
+
+protcreat$test <- 'protcreat_ratio'
+
+# test name Albumin/creatinine, Albumin/Creatinine, Albumin Creatinine Ratio (Urine), Albumin/Creatinine Ratio, Albumin/Creatinine Ratio (Urine)
+albcreat <- pathology %>% 
+    filter(test %in% c('Albumin/creatinine', 'Albumin/Creatinine', 
+                       'Albumin/Creatinine Ratio', 
+                       'Albumin/Creatinine Ratio (Urine)')) %>% 
+    select(id:value)
+
+albcreat$test <- 'albcreat_ratio'
+
+# 24h proteinuria in g/24h
+dt <- read_excel('Diagnosis.xlsx', 
+                 sheet = 'Urine24hrProtein',
+                 col_names = c('id', 'date', 'test.name', 'other.test.name', 
+                               'result.name', 'other.result', 'result', 
+                               'result.str', 'normal.range', 'units', 
+                               'provider'),
+                 col_types = c('numeric', 'date', 'skip', 'skip', 'text', 
+                               'skip', 'numeric', 'text', 'skip', 'text', 
+                               'text'),
+                 skip = 1, 
+                 na = 'NULL')
+
+proteinuria <- dt %>% 
+    mutate(value = parse_number(result.str)) %>% 
+    mutate(value = case_when(
+        units == 'mg' ~ result/1000,
+        TRUE ~ value
+    )) %>% 
+    mutate(test = "timedprotein") %>% 
+    select(id, date, test, value)
+```
+
+```{r Demographic data}
+patient <- read_excel('Diagnosis.xlsx', sheet = 'PtID',
+                      col_names = c('id', 'birth.year', 'gender'),
+                      col_types = c('numeric', 'numeric', 'text'),
+                      skip = 1, na = 'NULL')
+patient <- as.data.table(patient)
+setkey(patient, id)
+dt <- read_excel('need_gender_clarification.xlsx', sheet = 'Sheet1',
+                 col_names = c('id', 'sex'),
+                 col_types = c('numeric', 'text'),
+                 skip = 1, na = 'NULL')
+dt <- as.data.table(dt)
+setkey(dt, id)
+patient <- dt[patient]
+patient[, gender := fifelse(gender %chin% c('Indeterminate', 'Unknown'), sex, gender)]
+patient[, sex := NULL]
+setkey(patient, id)
+```
+
+```{r Glomerulonephritis}
+gn <- read_excel('Diagnosis.xlsx', sheet = 'GN Diagnosis',
+                 col_names = c('id', 'diagnosis', 'date'),
+                 col_types = c('numeric', 'text', 'date'), skip = 1,
+                 na = 'NULL')
+gn <- as.data.table(gn)
+excluded_gn <- c('Acute systemic lupus erythematosus', 'Autoimmune vasculitis', 
+                 'Cerebral vasculitis', 'Cryoglobulinemic vasculitis', 
+                 'Cutaneous lupus erythematosus', 
+                 'Cytomegalovirus-induced glomerulonephritis', 
+                 'Diabetic glomerulonephritis', 'Discoid lupus erythematosus',
+                 'Glomerulosclerosis', 
+                 'Hemolytic anemia associated with systemic lupus erythematosus',
+                 'Hyperfiltration focal segmental glomerulosclerosis', 
+                 'Localized cutaneous vasculitis',
+                 'Lupus erythematosus', 'Polyarteritis nodosa', 
+                 'Primary systemic vasculitis', 
+                 'Retinal vasculitis', 'Rheumatoid vasculitis', 
+                 'Rupture of anterior cruciate ligament',
+                 'Systemic lupus erythematosus', 
+                 'Systemic lupus erythematosus arthritis', 
+                 'Systemic lupus erythematosus-associated antiphospholipid syndrome', 
+                 'Systemic lupus erythematosus with organ or system involvement', 
+                 'Systemic lupus erythematosus, unspecified', 
+                 'Urticarial vasculitis', 
+                 'Vasculitis', 'Vasculitis secondary to drug ')
+gn[, diagnosis := fifelse(diagnosis %chin% excluded_gn, 'no', diagnosis)]
+gn <- gn[diagnosis != 'no',]
+gn[, date := NULL]
+lupus <- c('Systemic lupus erythematosus glomerulonephritis syndrome', 
+          'Systemic lupus erythematosus glomerulonephritis syndrome, World Health Organization (WHO) class III',
+          'Systemic lupus erythematosus glomerulonephritis syndrome, World Health Organization (WHO) class IV',
+           'Systemic lupus erythematosus glomerulonephritis syndrome, World Health Organization (WHO) class V',
+           'Systemic lupus erythematosus glomerulonephritis syndrome, World Health Organization (WHO) class VI')
+unspecific <- c('Acute glomerulonephritis', 'Chronic diffuse glomerulonephritis', 
+                'Chronic focal glomerulonephritis', 'Chronic glomerulonephritis',
+                'Crescentic glomerulonephritis', 
+                'Focal AND segmental proliferative glomerulonephritis',
+                'Glomerulonephritis', 'Immune-complex glomerulonephritis', 
+                'Necrotizing glomerulonephritis',
+                'Proliferative glomerulonephritis', 'Renal vasculitis', 
+                'Vasculitis secondary to drug')
+mp_mcgn <- c('Acute nephritic syndrome, diffuse mesangial proliferative glomerulonephritis', 'C3 Glomerulonephritis', 
+             'Mesangial proliferative glomerulonephritis', 
+             'Mesangial proliferative glomerulonephritis', 
+             'Mesangiocapillary glomerulonephritis', 
+             'Mesangiocapillary glomerulonephritis, type I', 
+             'Mesangiocapillary glomerulonephritis, type II')
+pign <- c('Acute post-streptococcal glomerulonephritis', 
+          'Post-infectious glomerulonephritis')
+anca <- c('Eosinophilc Granulomatosis with Polyangiitis', 
+          'Granulomatous Polyangiitis', 'Microscopic polyangiitis', 
+          'Microscopic Polyangiitis', 
+          'Primary pauci-immune necrotizing and crescentic glomerulonephritis',
+          "Wegener's granulomatosis")
+fg_itg <- c('Fibrillary glomerulonephritis', 'Immunotactoid Glomerulopathy')
+fsgs <- c('Focal Segmental Glomerulosclerosis')
+iga <- c('IgA nephropathy', 'Primary IgA nephropathy')
+membranous <- c('Membranous glomerulonephritis', 
+                'Membranous glomerulonephritis - stage III',
+                'Nephrotic syndrome, diffuse membranous glomerulonephritis')
+mcd <- c('Minimal change disease', 
+         'Steroid-dependent minimal change glomerulonephritis')
+gn_diagnosis <- list(lupus, unspecific, mp_mcgn, pign, anca, fg_itg, fsgs, iga, membranous, mcd)
+names(gn_diagnosis) <- c('lupus nephritis', 'unspecific', 'mp/mcgn', 'pign', 'anca','fgn/itg', 'fsgs', 'igan', 'membranous',
+                         'mcd')
+
+for (i in seq_along(gn_diagnosis)){
+  for(num in seq_along(gn$diagnosis)){
+    if (gn$diagnosis[num] %in% gn_diagnosis[[i]]){{
+      gn$diagnosis[num] <- names(gn_diagnosis[i])
+    }}
+  }
+}
+
+setkey(gn, id)
+gn <- unique(gn)
+# fixing patients with multiple diagnosis - diagnosis chosen based on the primary diagnosis
+gn[id == 4339 & diagnosis == 'mcd', diagnosis := NA]
+gn[id == 4551 & diagnosis == 'membranous', diagnosis := NA]
+gn[id == 10143 & diagnosis == 'igan', diagnosis := NA]
+gn[id == 15613 & diagnosis == 'mcd', diagnosis := NA]
+gn[id == 18367 & diagnosis == 'unspecific', diagnosis := NA]
+gn <- na.omit(gn)
+
+```
+
+```{r Vital signs}
+dt <- read_excel('Diagnosis.xlsx', sheet = 'Exams', 
+                 col_names = c('id', 'date', 'height', 'weight', 'bmi', 
+                               'sit_dia', 'sit_sys', 'sit_hr', 'sta_dia', 
+                               'sta_sys', 'sta_hr'),
+                 col_types = c('numeric', 'date', 'numeric', 'numeric', 
+                               'numeric', 'numeric', 'numeric', 'numeric', 
+                               'numeric', 'numeric', 'numeric'),
+                 skip = 1, na = 'NULL')
+dt <- as.data.table(dt)
+dt[, date := fastPOSIXct(date)]
+dt[, diff_dia := sit_dia-sta_dia] 
+dt[, diff_sys := sit_sys-sta_sys]
+dt[, diff_hr := sit_hr-sta_hr]
+
+exam <- melt(dt, id.vars = c('id', 'date'), na.rm = TRUE)
+exam[, outlier := scores(value, type = 'chisq', prob = thresh_chisq)] 
+exam <- exam[outlier == FALSE,]
+exam <- exam[, outlier := NULL]
+setnames(exam, old = 'variable', new = 'test')
+
+# creating hypertension diagnosis 
+dt2 <- exam[test == 'sit_sys' | test == 'sta_sys']
+dt2[, htn := fifelse(value >= 140, 'htn', 'no')]
+dt2 <- dt2[htn == 'htn',] 
+setkey(dt2, id)
+
+dt3 <- exam[test == 'sit_dia' | test == 'sta_dia']
+dt3[, htn := fifelse(value >= 90, 'htn', 'no')]
+dt3 <- dt3[htn == 'htn']
+setkey(dt3, id)
+
+htn <- rbind(dt2, dt3) %>% unique(by = 'id')
+htn[, c('date', 'test', 'value') := NULL]
+rm(dt2, dt3)
+```
+
+```{r Mortality}
+death <- read_excel('Diagnosis.xlsx',
+                    sheet = 'Death', 
+                    col_names = c('id', 'date'),
+                    col_types = c('numeric', 'date'), 
+                    na = 'NULL', skip = 1)
+death <- as.data.table(death)
+setkey(death,id,date)
+```
+
+```{r Modality}
+modality <- read_excel('Diagnosis.xlsx', 
+                       sheet = 'modality',
+                       col_names = c('id','date','end.date','modality','setting'),
+                       col_types = c('numeric', 'date', 'date', 'text', 'text'),
+                       skip = 1, na = 'NULL')
+modality <- as.data.table(modality)
+setkey(modality, id, date)
+transplant <- modality[modality == 'Transplant', 
+                       .(date = min(date), modality), 
+                       by = id]
+dialysis <- modality[modality %in% c('HD','PD','Nocturnal HD','Haemodiafiltration','Haemofiltration'),
+                     .(date = min(date), modality), 
+                     by = id]
+
+eskd_definition <- c('HD','PD','Nocturnal HD','Haemodiafiltration','Haemofiltration', 'Transplant')
+eskd_before <- modality[modality %chin% eskd_definition,]
+setkey(eskd_before, id, date)
+eskd_before <- eskd_before[, .SD[1], by = id]
+```
+
+```{r Melted pathology}
+melted <- na.omit(unique(rbindlist(
+    list(glucose, hba1c, exam, hb, hct, rdw, mch, mchc, mcv, wcc, rbc,
+         neut, lymph, eosin, monocyte, baso, platelet, ferritin, iron, 
+         transferrin, tsat, ca, phosph, pth, caphosproduct, alkphos, mg, 
+         sodium, potassium, chloride, bicarb, alt, alb, ggt, bili, globulin, 
+         protein, cholesterol, tg, ldl, hdl, tsh, creatinine, egfr, urate, 
+         urea, crp, esr, protcreat, proteinuria, albcreat))))
+setkey(melted, id, date)
+saveRDS(melted, file = 'melted.RDS')
+```
+
+```{r Engineering AKI, eval=FALSE, include=FALSE}
+dt <- melted[test == 'creatinine']
+setorder(dt, id, date)
+dt <- dt %>% 
+    group_by(id) %>% 
+    mutate(lag1 = lag(date, 1L),
+           lag2 = lag(date, 2L), 
+           lead1 = lead(date, 1L))
+dt <- dt %>% 
+    group_by(id) %>% 
+    mutate(intense = case_when(
+        difftime(date, lag1, units = 'days') <= 5 ~ 'yes',
+        difftime(date, lag2, units = 'days') <= 5 ~ 'yes',
+        difftime(date, lead1, units = 'days') >= -5 & difftime(date, lead1, units = 'days') <= 0 ~ 'yes',
+    TRUE ~ 'no'))
+
+# identify increase frequency of measuring kidney function and calculating baseline kidney function
+dt <- dt %>% 
+    group_by(id) %>% 
+    mutate(intense_code = rleid(intense))
+dt <- as.data.table(dt)
+dt[, baseline_function := baseline(.SD), by = id]
+dt[, aki_stage := fcase(
+  value / baseline_function >= 3, 3,
+  value / baseline_function >= 2, 2,
+  value / baseline_function >= 1.5, 1
+)]
+
+setkey(dt, id, date)
+
+# incorporating egfr, aki and modality
+setkey(egfr, id)
+dt <- unique(egfr[dt, allow.cartesian=TRUE])
+dt[, c('test', 'i.test', 'lag1', 'lag2', 'lead1') := NULL]
+setnames(dt, old = 'value', new = 'egfr')
+setnames(dt, old = 'i.value', new = 'creat')
+dt[, date2 := date]
+setcolorder(dt, c('id', 'date', 'date2', 'egfr', 'creat', 'baseline_function', 'intense', 'intense_code', 'aki_stage'))
+setnames(dt, old = 'date2', new = 'end.date')
+setkey(dt, id, date, end.date)
+
+aki <- modality[dt, roll = TRUE]
+aki[, aki_stage := fifelse(
+  modality %in% c('Haemodiafiltration', 'Haemofiltration', 'HD', 'PD', 'Nocturnal HD'), 0, aki_stage
+)]
+
+aki[, recovery := hd_recovery(modality), by = id]
+setkey(aki, id, date)
+aki <- aki[(aki_stage > 0) & (modality != 'Transplant')]
+aki <- aki[, .SD[which.max(aki_stage)], 
+                     by = c('id', 'intense_code')][, .(id, intense_code, modality, aki_stage, i.end.date)]
+aki[, n := .N, by = c('id', 'intense_code')]
+aki[, modality := NULL]
+setnames(aki, old = 'i.end.date', new = 'date')
+setcolorder(aki, neworder = c('id', 'date', 'intense_code', 'aki_stage', 'n'))
+```
+
+```{r AKI graph, include=FALSE, eval=FALSE}
+aki_plot <- aki %>% 
+    ggplot(aes(x = aki_stage)) + geom_bar() + xlab(NULL) + 
+    scale_x_discrete(breaks = c('1', '2', '3'), 
+                     labels = c('AKI Stage I', 'AKI Stage II', 'AKI Stage III')) +
+    labs(title = 'AKI Incidence by Stage') 
+aki_plot
+```
+
+```{r Pts with EUC}
+dt <- melted[test =='egfr']
+setkey(dt, id, date)
+egfr.init <- dt[, .SD[1], by = id]
+egfr.init$test <- 'egfr_init'
+egfr.last <- dt[, .SD[.N], by = id]
+egfr.last$test <- 'egfr_last'
+egfr.hit <- dt[dt[, .I[which(value <= 15)]], .SD[1], by = id]
+egfr.hit$test <- 'eskd'
+egfr.melt <- na.omit(rbindlist(list(egfr.init, egfr.last, egfr.hit)))
+dt <- dcast(egfr.melt, id ~ test, value.var = c('value', 'date'), sep = '_')
+setkey(dt, id)
+
+dt %>% 
+    distinct(across(id)) %>% 
+    count()
+```
+```{r Pts with missing demographic}
+dt <- merge(death, dt, all.y = TRUE, by = 'id')
+setnames(dt, old ='date', new = 'date.death')
+dt <- merge(patient, dt, all.y = TRUE, by = 'id')
+dt %>% filter(is.na(birth.year)) %>% count()
+```
+
+```{r Pts with pre-existing ESKD}
+dt <- dt[!is.na(birth.year),]
+dt <- merge(gn, dt, all.y = TRUE, by = 'id')
+setnames(dt, old = 'diagnosis', new = 'gn')
+dt[, gn := fifelse(is.na(gn), 'no', gn)]
+dt <- merge(dkd, dt, all.y = TRUE, by = 'id')
+dt[, dkd := fifelse(is.na(dkd), 'no', dkd)]
+dt <- merge(htn, dt, all.y = TRUE, by = 'id')
+dt[, htn := fifelse(is.na(htn), 'no', htn)]
+dt <- merge(eskd_before, dt, all.y = TRUE, by = 'id')
+dt[, c('end.date', 'setting') := NULL]
+setnames(dt, old = 'date', new = 'existing_date')
+
+dt <- dt %>% 
+    relocate(c('existing_date', 'modality'), .after = date_eskd) %>% 
+    mutate(preexisting_eskd = existing_date <= date_egfr_init) %>% 
+    replace_na(list(preexisting_eskd = FALSE))
+
+dt %>% count(preexisting_eskd)
+```
+
+```{r Outcomes dataset}
+dt <- dt %>% 
+    filter(preexisting_eskd == FALSE) %>% 
+    select(-preexisting_eskd)
+
+dt[date_eskd > existing_date, date_eskd := existing_date]
+dt[!is.na(date_eskd) & is.na(modality) & value_egfr_last > 17, date_eskd := NA]
+dt[, c('existing_date', 'modality') := NULL]
+
+outcomes_dt <- dt %>% 
+    relocate(date.death, .after = date_eskd) %>% 
+    mutate(age_init = year(date_egfr_init) - birth.year) %>% 
+    relocate(age_init, .after = birth.year)
+
+fwrite(outcomes_dt, 'outcome_data.gz')
+```
+
+```{r Features dataset}
+setkey(outcomes_dt, id)
+melted$relyear <- (melted$date - outcomes_dt[.(melted$id), date_egfr_init])/31557600 
+setattr(melted$relyear,'units','years')
+
+features_dt <- melted %>% 
+    filter(relyear >= 0)
+
+setkey(features_dt, id)
+fwrite(features_dt, 'features_data.gz')
+```
+
+```{r Relative Year for AKI Dataset, include=FALSE, message=FALSE, eval=FALSE}
+aki$relyear <- (aki$date - outcomes_dt[.(aki$id), date_egfr_init])/365.25
+setattr(aki$relyear, 'units', 'years')
+
+aki <- aki %>% 
+    filter(relyear > 0) %>% drop_na()
+
+setkey(aki, id)
+# fwrite(aki, 'aki_data.gz')
+```
+
