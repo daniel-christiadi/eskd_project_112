@@ -806,7 +806,6 @@ dt <- dt %>%
 
 dt %>% count(preexisting_eskd)
 ```
-
 ```{r Outcomes dataset}
 dt <- dt %>% 
     filter(preexisting_eskd == FALSE) %>% 
@@ -823,7 +822,6 @@ outcomes_dt <- dt %>%
 
 fwrite(outcomes_dt, 'outcome_data.gz')
 ```
-
 ```{r Features dataset}
 setkey(outcomes_dt, id)
 melted$relyear <- (melted$date - outcomes_dt[.(melted$id), date_egfr_init])/31557600 
@@ -846,4 +844,76 @@ aki <- aki %>%
 setkey(aki, id)
 # fwrite(aki, 'aki_data.gz')
 ```
+
+```{r}
+options(scipen = 5000)
+
+dt <- outcomes_dt %>% 
+    mutate(egfr_y = (date_egfr_last - date_egfr_init)/31557600) %>% 
+    mutate(eskd_y = (date_eskd - date_egfr_init)/31557600) %>% 
+    mutate(exclude_1y = case_when(
+        egfr_y <= 1 ~ 'yes',
+        eskd_y <= 1 ~ 'yes',
+        is.na(eskd_y) ~ 'no',
+        TRUE ~ 'no'
+    )) %>% 
+    mutate(exclude_2y = case_when(
+        egfr_y <= 2 ~ 'yes',
+        eskd_y <= 2 ~ 'yes',
+        is.na(eskd_y) ~ 'no',
+        TRUE ~ 'no'
+    ))
+
+setattr(dt$eskd_y, 'units', 'years')
+setattr(dt$egfr_y, 'units', 'years')
+
+m <- features_dt[test == 'egfr'][, .N, by = 'id']
+setkey(m, id)
+setnames(m, old = 'N', new = 'egfr_freq')
+dt <- merge(m, dt, all.y = TRUE, by = 'id')
+
+dt <- dt %>% 
+    mutate(egfr_freq_morethan_once = egfr_freq > 1) 
+
+ts_1y <- dt %>% 
+    filter(exclude_1y == 'no', egfr_freq_morethan_once == TRUE) %>% 
+    select(-(exclude_1y:egfr_freq_morethan_once)) %>% 
+    left_join(features_dt, by = 'id') %>% 
+    select(id, test, value, relyear)
+fwrite(ts_1y, 'ts_1y.gz')
+
+ts_2y <- dt %>% 
+    filter(exclude_2y == 'no', egfr_freq_morethan_once == TRUE) %>% 
+    select(-(exclude_1y:egfr_freq_morethan_once)) %>% 
+    left_join(features_dt, by = 'id') %>% 
+    select(id, test, value, relyear)
+fwrite(ts_2y, 'ts_2y.gz')
+```
+As the dataset containing the clinico-pathological of ts_1y is too big for tsfresh-featurisation, the dataset is divided into 2 files using disk.frame and fst
+```{r}
+library(disk.frame) 
+library(fst)
+
+shard(ts_1y, 
+      shardby = "id",
+      nchunks = 2,outdir = file.path(getwd(),"temp"))
+
+ts_1ya <- read_fst("temp/1.fst")
+fwrite(ts_1ya, file = "ts_1ya.gz")
+
+ts_1yb <- read_fst("temp/2.fst")
+fwrite(ts_1yb, file = "ts_1yb.gz")
+```
+The tsfresh-featurisation is performed in python (see ts_featurisation_script.ipynb). After tsfresh-featurisation, the output dataset (ts_1ya_feat.gz and ts_1yb_feat.gz) are combined into ts_1y_feat.gz
+```{r}
+ts_1ya_feat <- fread("ts_1ya_feat.gz")
+ts_1yb_feat <- fread("ts_1yb_feat.gz")
+ts_1y_feat <- rbind(ts_1ya_feat, ts_1yb_feat)
+fwrite(ts_1y_feat, file = "ts_1y_feat.gz")
+```
+
+```{r}
+
+```
+
 
