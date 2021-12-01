@@ -1,0 +1,100 @@
+---
+title: "training"
+author: "Daniel Christiadi"
+date: "28/10/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
+libraries <- c('plotly', 'heatmaply', 'shiny', 'reticulate',
+               'gt', 'gtsummary', 'data.table', 'tidyverse', 'skimr', 
+               'tidymodels', 'JMbayes2', "cmprsk")
+installed <- installed.packages()[,'Package']
+new.libs <- libraries[!(libraries %in% installed)]
+if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
+                                      dependencies=TRUE)
+lib.ok <- sapply(libraries, require, character.only=TRUE)
+
+features <<- c('height', 'weight', 'bmi', 'sit_dia', 'sit_sys', 'sit_hr', 
+               'sta_dia', 'sta_sys', 'sta_hr', 'diff_dia', 'diff_sys', 
+               'diff_hr', 'glucose', 'hba1c', 'haemoglobin', 'haematocrit', 
+               'rbc', 'rdw', 'mch', 'mchc', 'mcv', 'wcc', 'neutrophils', 
+               'lymphocytes', 'eosinophils', 'monocytes', 'basophils', 
+               'platelet', 'ferritin', 'iron', 'transferrin', 'tsat', 'calcium',
+               'phosphate', 'pth', 'caphos_product', 'alkphos', 'magnesium', 
+               'sodium', 'potassium', 'chloride', 'bicarbonate', 'alt', 
+               'albumin', 'ggt', 'bilirubin', 'globulin', 'protein', 
+               'cholesterol', 'triglycerides', 'ldl', 'hdl', 'tsh', 
+               'creatinine', 'egfr', 'urate', 'urea', 'crp', 
+               'esr', 'protcreat_ratio', 'timedprotein', 'albcreat_ratio')
+
+cross_val <- 5
+seed <- 7
+```
+
+```{r Creating cross-validation}
+short_dt <- readRDS("short_dt.RDS")
+
+set.seed(seed)
+folds <- vfold_cv(short_dt, v = cross_val,strata = "event",)
+
+short_dt1_train <- folds$splits[[1]] %>% analysis() 
+short_dt1_test <- folds$splits[[1]] %>% assessment()
+
+long_dt <- fread("long_dt.gz")
+
+long_dt1_train <- long_dt %>% 
+    filter(id %in% short_dt1_train$id)
+
+long_dt1_test <- long_dt %>% 
+    filter(id %in% short_dt1_test$id)
+```
+
+```{r Creating survival model}
+short_dt1_trainCR <- crLong(data = short_dt1_train,
+                            statusVar = "event", censLevel = "censored",
+                            nameStrata = "cr")
+
+
+jm_surv_model <- coxph(Surv(time = time, event = status2) ~ 
+                        (htn + dkd + gn + gender + age_init + 
+                             value_egfr_init)*strata(cr), 
+                    data = short_dt1_trainCR)
+jm_surv_model
+
+
+
+set.seed(seed)
+covs1 <- model.matrix(~ htn + dkd + gn + gender + age_init + 
+                             value_egfr_init, data = short_dt1_train)[, -1]
+
+crr_model <- crr(ftime = short_dt1_train$time, 
+                 fstatus = short_dt1_train$event, 
+                 cov1 = covs1, cencode = "censored", 
+                 failcode = "eskd")
+summary(crr_model)
+
+
+surv_model <- coxph(Surv(time = time, event = event) ~ htn + dkd + gn + 
+                        gender + age_init + value_egfr_init,
+                    data = short_dt1_train, id = id)
+summary(surv_model)
+```
+
+```{r Creating longitudinal model}
+long_dt1_train <- long_dt1_train %>% 
+    left_join(dplyr::select(short_dt1_train, id, age_init, htn, dkd, gn, gender), 
+              by = "id")
+
+
+
+long_egfr <- lme(egfr ~ relyear + I(relyear^2), 
+                 random = ~ 1| id, 
+                 data = long_dt1_train, na.action = na.omit)
+
+summary(long_egfr)
+```
+

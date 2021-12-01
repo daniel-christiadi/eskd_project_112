@@ -3,13 +3,14 @@ title: "Preparing_dataset"
 author: "Daniel Christiadi"
 date: "04/10/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
-libraries <- c('readxl', 'tidyverse', 'factoextra', 'cluster', 'dendextend', 
-               'ggExtra', 'patchwork','fasttime', 'broom', 'outliers', 'skimr', 
-               'plotly', 'heatmaply', 'shiny', 'iml', 'data.table', 'reticulate',
+libraries <- c('readxl', 'tidyverse','fasttime', 'broom', 'outliers', 'skimr', 
+               'plotly', 'heatmaply', 'shiny', 'data.table', 'reticulate',
                'gt', 'gtsummary')
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
@@ -18,21 +19,8 @@ if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
 lib.ok <- sapply(libraries, require, character.only=TRUE)
 thresh_chisq <<- 0.999999999
 
-features <<- c('height', 'weight', 'bmi', 'sit_dia', 'sit_sys', 'sit_hr', 
-               'sta_dia', 'sta_sys', 'sta_hr', 'diff_dia', 'diff_sys', 
-               'diff_hr', 'glucose', 'hba1c', 'haemoglobin', 'haematocrit', 
-               'rbc', 'rdw', 'mch', 'mchc', 'mcv', 'wcc', 'neutrophils', 
-               'lymphocytes', 'eosinophils', 'monocytes', 'basophils', 
-               'platelet', 'ferritin', 'iron', 'transferrin', 'tsat', 'calcium',
-               'phosphate', 'pth', 'caphos_product', 'alkphos', 'magnesium', 
-               'sodium', 'potassium', 'chloride', 'bicarbonate', 'alt', 
-               'albumin', 'ggt', 'bilirubin', 'globulin', 'protein', 
-               'cholesterol', 'triglycerides', 'ldl', 'hdl', 'tsh', 
-               'creatinine', 'egfr', 'urate', 'urea', 'crp', 
-               'esr', 'protcreat_ratio', 'timedprotein', 'albcreat_ratio')
+extraction_date <- fastPOSIXct("2021-05-01")
 
-use_condaenv(condaenv = 'ml_dl')
-source('PhD Project 1 Function.R')
 ```
 
 ```{r Parsing raw data, include=FALSE, eval=FALSE}
@@ -696,72 +684,6 @@ setkey(melted, id, date)
 saveRDS(melted, file = 'melted.RDS')
 ```
 
-```{r Engineering AKI, eval=FALSE, include=FALSE}
-dt <- melted[test == 'creatinine']
-setorder(dt, id, date)
-dt <- dt %>% 
-    group_by(id) %>% 
-    mutate(lag1 = lag(date, 1L),
-           lag2 = lag(date, 2L), 
-           lead1 = lead(date, 1L))
-dt <- dt %>% 
-    group_by(id) %>% 
-    mutate(intense = case_when(
-        difftime(date, lag1, units = 'days') <= 5 ~ 'yes',
-        difftime(date, lag2, units = 'days') <= 5 ~ 'yes',
-        difftime(date, lead1, units = 'days') >= -5 & difftime(date, lead1, units = 'days') <= 0 ~ 'yes',
-    TRUE ~ 'no'))
-
-# identify increase frequency of measuring kidney function and calculating baseline kidney function
-dt <- dt %>% 
-    group_by(id) %>% 
-    mutate(intense_code = rleid(intense))
-dt <- as.data.table(dt)
-dt[, baseline_function := baseline(.SD), by = id]
-dt[, aki_stage := fcase(
-  value / baseline_function >= 3, 3,
-  value / baseline_function >= 2, 2,
-  value / baseline_function >= 1.5, 1
-)]
-
-setkey(dt, id, date)
-
-# incorporating egfr, aki and modality
-setkey(egfr, id)
-dt <- unique(egfr[dt, allow.cartesian=TRUE])
-dt[, c('test', 'i.test', 'lag1', 'lag2', 'lead1') := NULL]
-setnames(dt, old = 'value', new = 'egfr')
-setnames(dt, old = 'i.value', new = 'creat')
-dt[, date2 := date]
-setcolorder(dt, c('id', 'date', 'date2', 'egfr', 'creat', 'baseline_function', 'intense', 'intense_code', 'aki_stage'))
-setnames(dt, old = 'date2', new = 'end.date')
-setkey(dt, id, date, end.date)
-
-aki <- modality[dt, roll = TRUE]
-aki[, aki_stage := fifelse(
-  modality %in% c('Haemodiafiltration', 'Haemofiltration', 'HD', 'PD', 'Nocturnal HD'), 0, aki_stage
-)]
-
-aki[, recovery := hd_recovery(modality), by = id]
-setkey(aki, id, date)
-aki <- aki[(aki_stage > 0) & (modality != 'Transplant')]
-aki <- aki[, .SD[which.max(aki_stage)], 
-                     by = c('id', 'intense_code')][, .(id, intense_code, modality, aki_stage, i.end.date)]
-aki[, n := .N, by = c('id', 'intense_code')]
-aki[, modality := NULL]
-setnames(aki, old = 'i.end.date', new = 'date')
-setcolorder(aki, neworder = c('id', 'date', 'intense_code', 'aki_stage', 'n'))
-```
-
-```{r AKI graph, include=FALSE, eval=FALSE}
-aki_plot <- aki %>% 
-    ggplot(aes(x = aki_stage)) + geom_bar() + xlab(NULL) + 
-    scale_x_discrete(breaks = c('1', '2', '3'), 
-                     labels = c('AKI Stage I', 'AKI Stage II', 'AKI Stage III')) +
-    labs(title = 'AKI Incidence by Stage') 
-aki_plot
-```
-
 ```{r Pts with EUC}
 dt <- melted[test =='egfr']
 setkey(dt, id, date)
@@ -779,13 +701,14 @@ dt %>%
     distinct(across(id)) %>% 
     count()
 ```
+There was a total of 15,433 patients ID extracted from pathology with 5,085 excluded due to absence of kidney function.
 ```{r Pts with missing demographic}
 dt <- merge(death, dt, all.y = TRUE, by = 'id')
 setnames(dt, old ='date', new = 'date.death')
 dt <- merge(patient, dt, all.y = TRUE, by = 'id')
 dt %>% filter(is.na(birth.year)) %>% count()
 ```
-
+There was 68 patients with incomplete demographic data.
 ```{r Pts with pre-existing ESKD}
 dt <- dt[!is.na(birth.year),]
 dt <- merge(gn, dt, all.y = TRUE, by = 'id')
@@ -806,6 +729,7 @@ dt <- dt %>%
 
 dt %>% count(preexisting_eskd)
 ```
+A total of 493 patients had underlying ESKD leaving 9,787 for further analysis
 ```{r Outcomes dataset}
 dt <- dt %>% 
     filter(preexisting_eskd == FALSE) %>% 
@@ -834,86 +758,107 @@ setkey(features_dt, id)
 fwrite(features_dt, 'features_data.gz')
 ```
 
-```{r Relative Year for AKI Dataset, include=FALSE, message=FALSE, eval=FALSE}
-aki$relyear <- (aki$date - outcomes_dt[.(aki$id), date_egfr_init])/365.25
-setattr(aki$relyear, 'units', 'years')
-
-aki <- aki %>% 
-    filter(relyear > 0) %>% drop_na()
-
-setkey(aki, id)
-# fwrite(aki, 'aki_data.gz')
-```
-
 ```{r}
 options(scipen = 5000)
 
-dt <- outcomes_dt %>% 
+short_dt <- outcomes_dt %>% 
     mutate(egfr_y = (date_egfr_last - date_egfr_init)/31557600) %>% 
     mutate(eskd_y = (date_eskd - date_egfr_init)/31557600) %>% 
-    mutate(exclude_1y = case_when(
-        egfr_y <= 1 ~ 'yes',
-        eskd_y <= 1 ~ 'yes',
-        is.na(eskd_y) ~ 'no',
-        TRUE ~ 'no'
-    )) %>% 
-    mutate(exclude_2y = case_when(
-        egfr_y <= 2 ~ 'yes',
-        eskd_y <= 2 ~ 'yes',
-        is.na(eskd_y) ~ 'no',
-        TRUE ~ 'no'
-    ))
+    mutate(death_y = (date.death - date_egfr_init)/365.25) %>% 
+    mutate(censor_y = (extraction_date - date_egfr_init)/365.25)
 
-setattr(dt$eskd_y, 'units', 'years')
-setattr(dt$egfr_y, 'units', 'years')
+setattr(short_dt$eskd_y, 'units', 'years')
+setattr(short_dt$egfr_y, 'units', 'years')
+setattr(short_dt$death_y, "units", "years")
+setattr(short_dt$censor_y, "units", "years")
 
 m <- features_dt[test == 'egfr'][, .N, by = 'id']
 setkey(m, id)
 setnames(m, old = 'N', new = 'egfr_freq')
-dt <- merge(m, dt, all.y = TRUE, by = 'id')
+short_dt <- merge(m, short_dt, all.y = TRUE, by = 'id')
 
-dt <- dt %>% 
-    mutate(egfr_freq_morethan_once = egfr_freq > 1) 
-
-ts_1y <- dt %>% 
-    filter(exclude_1y == 'no', egfr_freq_morethan_once == TRUE) %>% 
-    select(-(exclude_1y:egfr_freq_morethan_once)) %>% 
-    left_join(features_dt, by = 'id') %>% 
-    select(id, test, value, relyear)
-fwrite(ts_1y, 'ts_1y.gz')
-
-ts_2y <- dt %>% 
-    filter(exclude_2y == 'no', egfr_freq_morethan_once == TRUE) %>% 
-    select(-(exclude_1y:egfr_freq_morethan_once)) %>% 
-    left_join(features_dt, by = 'id') %>% 
-    select(id, test, value, relyear)
-fwrite(ts_2y, 'ts_2y.gz')
+short_dt %>% 
+    mutate(egfr_freq_less_than_two = egfr_freq < 2) %>% 
+    count(egfr_freq_less_than_two)
 ```
-As the dataset containing the clinico-pathological of ts_1y is too big for tsfresh-featurisation, the dataset is divided into 2 files using disk.frame and fst
-```{r}
-library(disk.frame) 
-library(fst)
-
-shard(ts_1y, 
-      shardby = "id",
-      nchunks = 2,outdir = file.path(getwd(),"temp"))
-
-ts_1ya <- read_fst("temp/1.fst")
-fwrite(ts_1ya, file = "ts_1ya.gz")
-
-ts_1yb <- read_fst("temp/2.fst")
-fwrite(ts_1yb, file = "ts_1yb.gz")
-```
-The tsfresh-featurisation is performed in python (see ts_featurisation_script.ipynb). After tsfresh-featurisation, the output dataset (ts_1ya_feat.gz and ts_1yb_feat.gz) are combined into ts_1y_feat.gz
-```{r}
-ts_1ya_feat <- fread("ts_1ya_feat.gz")
-ts_1yb_feat <- fread("ts_1yb_feat.gz")
-ts_1y_feat <- rbind(ts_1ya_feat, ts_1yb_feat)
-fwrite(ts_1y_feat, file = "ts_1y_feat.gz")
-```
+There was a total of 1,682 patients with eGFR frequency less than 2. They were excluded leaving 8,105 patients
 
 ```{r}
+short_dt <- short_dt %>% 
+    mutate(egfr_freq_less_than_two = egfr_freq < 2) %>% 
+    filter(egfr_freq_less_than_two == FALSE) %>% 
+    select(-egfr_freq, -birth.year, -value_egfr_last, -value_eskd, -egfr_freq_less_than_two) %>% 
+    mutate(time = pmin.int(death_y, eskd_y, censor_y, na.rm = TRUE))
 
+short_dt %>% 
+    filter(time <= 0.1) %>% 
+    count()
 ```
+There were 537 patients who developed ESKD (521), death (6), or censored (10) less or equal than 0.1 years (36 days), which were, then, excluded. (There were 7,568 patients left. The mean time 0.00450 years (~1 day) and median time 0. 
+
+```{r Excluded dataset}
+excluded_dt <- short_dt %>% 
+    filter(time <= 0.1) 
+    
+excluded_dt <- excluded_dt %>% 
+    mutate(event = case_when(
+        time == as.numeric(death_y) ~ "death",
+        time == as.numeric(eskd_y) ~ "eskd",
+        TRUE ~ "censored"
+    ))
+```
+As there was only 1 case of PIGN, the decision was to collapse PIGN into unspecific GN diagnosis.
+```{r Creating short_dt}
+short_dt[gn == "pign", gn := "unspecific"]
+
+short_dt <- short_dt %>% 
+    filter(time > 0.1) %>% 
+    mutate(event = case_when(
+        time == as.numeric(death_y) ~ "death",
+        time == as.numeric(eskd_y) ~ "eskd",
+        TRUE ~ "censored"
+    )) %>% 
+    mutate(event = factor(event, 
+                          levels = c("censored", "eskd", "death"))) %>% 
+    select(-(date_egfr_init:censor_y)) %>% 
+    mutate(htn = factor(htn, levels = c("no", "htn"))) %>% 
+    mutate(dkd = factor(dkd, levels = c("no", "dkd"))) %>% 
+    mutate(gn = factor(gn, 
+                       levels = c("no", "anca", "fgn/itg", "fsgs", "igan", 
+                                  "lupus nephritis", "mcd", "membranous",
+                                  "mp/mcgn", "unspecific"))) %>% 
+    mutate(gender = factor(gender))
+
+saveRDS(short_dt, "short_dt.RDS")
+```
+
+```{r Creating long_dt}
+long_dt <- features_dt %>% 
+    filter(id %in% short_dt$id)
+
+long_dt <- long_dt %>% 
+    select(-date) %>% 
+    mutate(relyear = round(relyear, digits = 1))
+
+long_dt <- long_dt %>%
+    pivot_wider(id_cols = c("id", "relyear"),
+                names_from = test,
+                values_from = value,
+                values_fn = mean)
+
+long_dt <- long_dt %>% 
+    left_join(dplyr::select(short_dt, id, time), by = "id")
+
+long_dt <- long_dt %>% 
+    relocate(time, .after = relyear) %>% 
+    filter(relyear < time) %>% 
+    select(-time)
+
+fwrite(long_dt, file = "long_dt.gz")
+```
+
+
+
+
 
 

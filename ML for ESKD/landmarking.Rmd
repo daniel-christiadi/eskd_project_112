@@ -1,0 +1,54 @@
+---
+title: "landmarking"
+author: "Daniel Christiadi"
+date: "26/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
+libraries <- c('plotly', 'heatmaply', 'shiny', 'reticulate',
+               'gt', 'gtsummary', 'data.table', 'tidyverse', 'skimr', 
+               'tidymodels', )
+installed <- installed.packages()[,'Package']
+new.libs <- libraries[!(libraries %in% installed)]
+if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
+                                      dependencies=TRUE)
+lib.ok <- sapply(libraries, require, character.only=TRUE)
+
+features <<- c('height', 'weight', 'bmi', 'sit_dia', 'sit_sys', 'sit_hr', 
+               'sta_dia', 'sta_sys', 'sta_hr', 'diff_dia', 'diff_sys', 
+               'diff_hr', 'glucose', 'hba1c', 'haemoglobin', 'haematocrit', 
+               'rbc', 'rdw', 'mch', 'mchc', 'mcv', 'wcc', 'neutrophils', 
+               'lymphocytes', 'eosinophils', 'monocytes', 'basophils', 
+               'platelet', 'ferritin', 'iron', 'transferrin', 'tsat', 'calcium',
+               'phosphate', 'pth', 'caphos_product', 'alkphos', 'magnesium', 
+               'sodium', 'potassium', 'chloride', 'bicarbonate', 'alt', 
+               'albumin', 'ggt', 'bilirubin', 'globulin', 'protein', 
+               'cholesterol', 'triglycerides', 'ldl', 'hdl', 'tsh', 
+               'creatinine', 'egfr', 'urate', 'urea', 'crp', 
+               'esr', 'protcreat_ratio', 'timedprotein', 'albcreat_ratio')
+
+training_prop <- 0.8
+seed <- 7
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
