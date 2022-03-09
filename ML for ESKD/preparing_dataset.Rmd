@@ -20,7 +20,6 @@ lib.ok <- sapply(libraries, require, character.only=TRUE)
 thresh_chisq <<- 0.999999999
 
 extraction_date <- fastPOSIXct("2021-05-01")
-
 ```
 
 ```{r Parsing raw data, include=FALSE, eval=FALSE}
@@ -782,7 +781,6 @@ short_dt %>%
     count(egfr_freq_less_than_two)
 ```
 There was a total of 1,682 patients with eGFR frequency less than 2. They were excluded leaving 8,105 patients
-
 ```{r}
 short_dt <- short_dt %>% 
     mutate(egfr_freq_less_than_two = egfr_freq < 2) %>% 
@@ -857,6 +855,56 @@ long_dt <- long_dt %>%
 fwrite(long_dt, file = "long_dt.gz")
 ```
 
+```{r Investigation of missing test}
+miss_function <- function(dt_name, test_name){
+   dt_name %>% 
+    group_by(id) %>% 
+    mutate(missing_test = sum(is.na({{test_name}}))) %>% 
+    add_count(id) %>% 
+    select(id, {{test_name}}, missing_test, n) %>% 
+    filter(missing_test == n) %>% 
+    select(id, missing_test, n) %>% 
+    distinct(id, .keep_all = TRUE) 
+}
+
+egfr_miss <- miss_function(long_dt, egfr)
+calcium_miss<- miss_function(long_dt, calcium)
+phosph_miss <- miss_function(long_dt, phosphate)
+bicarbonate_miss <- miss_function(long_dt, bicarbonate)
+albumin_miss <- miss_function(long_dt, albumin)
+magnesium_miss <- miss_function(long_dt, magnesium)
+alkphos_miss <- miss_function(long_dt, alkphos)
+sodium_miss <- miss_function(long_dt, sodium)
+potassium_miss <- miss_function(long_dt, potassium)
+chloride_miss <- miss_function(long_dt, chloride)
+urate_miss <- miss_function(long_dt, urate)
+pth_miss <- miss_function(long_dt, pth)
+crp_miss <- miss_function(long_dt, crp)
+hb_miss <- miss_function(long_dt, haemoglobin)
+plt_miss <- miss_function(long_dt, platelet)
+neut_miss <- miss_function(long_dt, neutrophils)
+lymph_miss <- miss_function(long_dt, lymphocytes)
+bmi_miss <- miss_function(long_dt, bmi)
+glu_miss <- miss_function(long_dt, glucose)
+diffsys_miss <- miss_function(long_dt, diff_sys)
+diffdia_miss <- miss_function(long_dt, diff_dia)
+
+esr_miss <- miss_function(long_dt, esr)
+
+pcracr_miss <- long_dt %>% 
+    group_by(id) %>% 
+    mutate(missing_acr = sum(is.na(albcreat_ratio)),
+           missing_pcr = sum(is.na(protcreat_ratio))) %>% 
+    add_count(id) %>% 
+    select(id, protcreat_ratio, albcreat_ratio, missing_acr, missing_pcr, n) %>%
+    filter(missing_acr == n | missing_pcr == n) %>% 
+    distinct(id, .keep_all = TRUE)
+
+```
+
+```{r}
+patient <- readxl::read_excel("Diagnosis.xlsx", sheet = "PtID")
+```
 
 
 

@@ -45,7 +45,6 @@ secondary_cluster <- c('albcreat_ratio', 'timedprotein', 'protcreat_ratio',
                        'ferritin', 'hba1c', 'diff_sys', 'diff_dia', 'sta_hr', 
                        'sta_sys', 'sta_dia', 'sit_hr', 'sit_sys', 
                        'sit_dia', 'bmi', 'weight', 'height')
-use_condaenv(condaenv = 'ml_dl')
 ```
 
 ## Baseline characteristics

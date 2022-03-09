@@ -9,92 +9,414 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
-libraries <- c('plotly', 'heatmaply', 'shiny', 'reticulate',
-               'gt', 'gtsummary', 'data.table', 'tidyverse', 'skimr', 
-               'tidymodels', 'JMbayes2', "cmprsk")
+libraries <- c('plotly', 'heatmaply', 'shiny', 'gt', 'gtsummary', 'data.table',
+               'tidyverse', 'skimr', 'tidymodels', 'JMbayes2', "cmprsk", 
+               "broom.mixed")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
                                       dependencies=TRUE)
 lib.ok <- sapply(libraries, require, character.only=TRUE)
 
-features <<- c('height', 'weight', 'bmi', 'sit_dia', 'sit_sys', 'sit_hr', 
-               'sta_dia', 'sta_sys', 'sta_hr', 'diff_dia', 'diff_sys', 
-               'diff_hr', 'glucose', 'hba1c', 'haemoglobin', 'haematocrit', 
-               'rbc', 'rdw', 'mch', 'mchc', 'mcv', 'wcc', 'neutrophils', 
-               'lymphocytes', 'eosinophils', 'monocytes', 'basophils', 
-               'platelet', 'ferritin', 'iron', 'transferrin', 'tsat', 'calcium',
-               'phosphate', 'pth', 'caphos_product', 'alkphos', 'magnesium', 
-               'sodium', 'potassium', 'chloride', 'bicarbonate', 'alt', 
-               'albumin', 'ggt', 'bilirubin', 'globulin', 'protein', 
-               'cholesterol', 'triglycerides', 'ldl', 'hdl', 'tsh', 
-               'creatinine', 'egfr', 'urate', 'urea', 'crp', 
-               'esr', 'protcreat_ratio', 'timedprotein', 'albcreat_ratio')
-
 cross_val <- 5
 seed <- 7
 ```
 
-```{r Creating cross-validation}
-short_dt <- readRDS("short_dt.RDS")
+```{r cross-validation}
+short_dt <- readRDS("acrbased_short.RDS")
 
 set.seed(seed)
-folds <- vfold_cv(short_dt, v = cross_val,strata = "event",)
+folds <- vfold_cv(short_dt, v = cross_val,strata = "status_compete")
 
 short_dt1_train <- folds$splits[[1]] %>% analysis() 
 short_dt1_test <- folds$splits[[1]] %>% assessment()
 
-long_dt <- fread("long_dt.gz")
-
-long_dt1_train <- long_dt %>% 
-    filter(id %in% short_dt1_train$id)
-
-long_dt1_test <- long_dt %>% 
-    filter(id %in% short_dt1_test$id)
+long_dt <- readRDS("acrbased_long.RDS")
 ```
 
-```{r Creating survival model}
-short_dt1_trainCR <- crLong(data = short_dt1_train,
-                            statusVar = "event", censLevel = "censored",
-                            nameStrata = "cr")
+```{r survival model}
+short_dt1trainCR <- short_dt1_train %>% 
+    select(id:htn, time_compete, status_compete) %>% 
+    mutate(status_compete = factor(status_compete, levels = c(0, 1, 2),
+                                   labels = c("censored", "eskd", "death"))) %>% 
+    JMbayes2::crisk_setup(data = .,
+                          statusVar = "status_compete",
+                          censLevel = "censored",
+                          nameStrata = "CR")
 
-
-jm_surv_model <- coxph(Surv(time = time, event = status2) ~ 
-                        (htn + dkd + gn + gender + age_init + 
-                             value_egfr_init)*strata(cr), 
-                    data = short_dt1_trainCR)
-jm_surv_model
-
-
-
-set.seed(seed)
-covs1 <- model.matrix(~ htn + dkd + gn + gender + age_init + 
-                             value_egfr_init, data = short_dt1_train)[, -1]
-
-crr_model <- crr(ftime = short_dt1_train$time, 
-                 fstatus = short_dt1_train$event, 
-                 cov1 = covs1, cencode = "censored", 
-                 failcode = "eskd")
-summary(crr_model)
-
-
-surv_model <- coxph(Surv(time = time, event = event) ~ htn + dkd + gn + 
-                        gender + age_init + value_egfr_init,
-                    data = short_dt1_train, id = id)
-summary(surv_model)
+jm_surv_model <- coxph(Surv(time = time_compete, event = status2) ~ 
+                        (htn + dkd + gn + sex + age_init + 
+                             value_egfr_init)*strata(CR), 
+                    data = short_dt1trainCR)
+summary(jm_surv_model)
 ```
 
-```{r Creating longitudinal model}
-long_dt1_train <- long_dt1_train %>% 
-    left_join(dplyr::select(short_dt1_train, id, age_init, htn, dkd, gn, gender), 
-              by = "id")
+```{r longitudinal covariates}
+long_dt1train <- long_dt %>% 
+    right_join(dplyr::select(short_dt1trainCR, id, sex, age_init,
+                             dkd, htn), by = "id") %>% distinct()
 
-
-
-long_egfr <- lme(egfr ~ relyear + I(relyear^2), 
-                 random = ~ 1| id, 
-                 data = long_dt1_train, na.action = na.omit)
-
-summary(long_egfr)
+long_dt1train <- long_dt1train %>% 
+    pivot_wider(id_cols = c("id", "relyear", "sex", "age_init", "dkd", "htn"),
+                names_from = test,values_from = value,
+                values_fn = mean)
 ```
 
+```{r function to create linear mixed model}
+linear_model_function <- function(y_name, dataset){
+    group_variables <- c("relyear", "age_init", "sex", "htn", "dkd")
+    lmm_formula <- reformulate(group_variables,
+                               response = y_name)
+    lme(lmm_formula, random = ~ relyear|id,
+        data = dataset, na.action = na.omit,
+        control = list(maxIter = 100, opt = "optim"))
+}
+```
+
+```{r base models}
+alb_base_model <- linear_model_function("albumin", long_dt1train)
+albcreat_base_model <- linear_model_function("albcreat_ratio", long_dt1train)
+alkphos_base_model <- linear_model_function("alkphos", long_dt1train)
+alt_base_model <- linear_model_function("alt", long_dt1train)
+bicarb_base_model <- linear_model_function("bicarb", long_dt1train)
+bilirubin_base_model <- linear_model_function("bilirubin", long_dt1train)
+adjca_base_model <- linear_model_function("adjca", long_dt1train)
+chloride_base_model <- linear_model_function("chloride", long_dt1train)
+crp_base_model <- linear_model_function("crp", long_dt1train)
+egfr_base_model <- linear_model_function("egfr", long_dt1train)
+ggt_base_model <- linear_model_function("ggt", long_dt1train)
+globulin_base_model <- linear_model_function("globulin", long_dt1train)
+glucose_base_model <- linear_model_function("glucose", long_dt1train)
+hb_base_model <- linear_model_function("haemoglobin", long_dt1train)
+hct_base_model <- linear_model_function("haematocrit", long_dt1train)
+mch_base_model <- linear_model_function("mch", long_dt1train)
+mcv_base_model <- linear_model_function("mcv", long_dt1train)
+mg_base_model <- linear_model_function("magnesium", long_dt1train)
+ph_base_model <- linear_model_function("phosphate", long_dt1train)
+plt_base_model <- linear_model_function("platelet", long_dt1train)
+potassium_base_model <- linear_model_function("potassium", long_dt1train)
+sodium_base_model <- linear_model_function("sodium", long_dt1train)
+urate_base_model <- linear_model_function("urate", long_dt1train)
+wcc_base_model <- linear_model_function("wcc", long_dt1train)
+bmi_base_model <- linear_model_function("bmi", long_dt1train)
+sitsys_base_model <- linear_model_function("sitsys", long_dt1train)
+sitdias_base_model <- linear_model_function("sitdias", long_dt1train)
+postsys_base_model <- linear_model_function("postural_sys", long_dt1train)
+postdias_base_model <- linear_model_function("postural_dias", long_dt1train)
+```
+
+```{r base joint model}
+base_CR_forms <- list(
+    "albumin" = ~ value(albumin):CR,
+    "albcreat_ratio" = ~ value(albcreat_ratio):CR,
+    "alkphos" = ~ value(alkphos):CR,
+    "alt" = ~ value(alt):CR,
+    "bicarb" = ~ value(bicarb):CR,
+    "bilirubin" = ~ value(bilirubin):CR,
+    "adjca" = ~ value(adjca):CR,
+    "chloride" = ~ value(chloride):CR,
+    "crp" = ~ value(crp):CR,
+    "egfr" = ~ value(egfr):CR,
+    "ggt" = ~ value(ggt):CR,
+    "globulin" = ~ value(globulin):CR,
+    "haemoglobin" = ~ value(haemoglobin):CR,
+    "haematocrit" = ~ value(haematocrit):CR,
+    "mch" = ~ value(mch):CR,
+    "mcv" = ~ value(mcv):CR,
+    "magnesium" = ~ value(magnesium):CR,
+    "phosphate" = ~ value(phosphate):CR,
+    "platelet" = ~ value(platelet):CR,
+    "potassium" = ~ value(potassium):CR,
+    "sodium" = ~ value(sodium):CR,
+    "urate" = ~ value(urate):CR,
+    "wcc" = ~ value(wcc):CR,
+    "sitsys" = ~ value(sitsys):CR,
+    "sitdias" = ~ value(sitdias):CR,
+    "postural_sys" = ~ value(postural_sys):CR,
+    "postural_dias" = ~ value(postural_dias):CR
+)
+
+joint_model_base <- jm(Surv_object = jm_surv_model,
+                       Mixed_objects = list(alb_base_model, albcreat_base_model,
+                                            alkphos_base_model, alt_base_model,
+                                            bicarb_base_model,
+                                            bilirubin_base_model,
+                                            adjca_base_model, 
+                                            chloride_base_model,
+                                            crp_base_model, egfr_base_model,
+                                            ggt_base_model, globulin_base_model,
+                                            hb_base_model, hct_base_model,
+                                            mch_base_model, mcv_base_model,
+                                            mg_base_model, ph_base_model,
+                                            plt_base_model, potassium_base_model,
+                                            sodium_base_model, urate_base_model,
+                                            wcc_base_model, bmi_base_model,
+                                            sitsys_base_model, 
+                                            sitdias_base_model,
+                                            postsys_base_model,
+                                            postdias_base_model),
+                       time_var = "relyear",
+                       functional_forms = base_CR_forms,
+                       n_iter = 30000L, n_burnin = 6000L, n_thin = 5L)
+```
+```
+
+```{r egfr model}
+egfr_model <- lme(egfr ~ relyear + age_init + sex + htn + dkd,
+                  random = ~ relyear | id,
+                  data = long_dt1train, na.action = na.omit,
+                  control = list(maxIter = 100, opt = "optim"))
+summary(egfr_model)
+
+egfr_model1 <- lme(egfr ~ relyear + I(relyear^2) + age_init + sex + 
+                      htn + dkd,
+                  random = ~ relyear | id,
+                  data = long_dt1train, na.action = na.omit,)
+summary(egfr_model1)
+
+egfr_model2 <- lme(egfr ~ relyear + ns(relyear,) + age_init + sex + dkd,
+                   random = ~ relyear|id,
+                   data = long_dt1train, na.action = na.omit,
+                   control = list(maxIter = 100, opt = "optim"))
+summary(egfr_model2)
+# egfr_model2 had the lowest AIC
+```
+
+```{r albcreat model}
+albcreat_model <- lme(albcreat_ratio ~ relyear + age_init + sex + dkd + htn,
+                       random = ~ relyear | id,
+                       data = long_dt1train, na.action = na.omit)
+summary(albcreat_model)
+
+albcreat_model1 <- update(albcreat_model,
+                          fixed. = albcreat_ratio ~ relyear + I(relyear^2) + age_init + sex + dkd)
+summary(albcreat_model1)
+# albcreat_model1 had the lowest AIC
+```
+
+```{r calcium model}
+ca_model <- lme(calcium ~ relyear + age_init + sex + htn + dkd,
+                random = ~ relyear | id,
+                data = long_dt1train, na.action = na.omit)
+summary(ca_model)
+
+ca_model1 <- update(ca_model, 
+                    fixed. = calcium ~ relyear + I(relyear^2) + age_init + 
+                        sex + htn + dkd)
+summary(ca_model1)
+```
+ca_model1 had the lowest AIC
+```{r phosphate model}
+ph_model <- lme(phosphate ~ relyear + sex + dkd,
+                random = ~ relyear | id,
+                data = long_dt1train, na.action = na.omit,
+                control = list(maxIter = 100, opt = "optim"))
+summary(ph_model)
+
+ph_model1 <- update(ph_model,
+                    fixed. = phosphate ~ relyear + I(relyear^2) + sex + dkd)
+summary(ph_model1)
+```
+ph_model1 had the lowest AIC (but minimal). Hence, ph_model was chosen
+```{r bicarbonate model}
+bicarb_model <- lme(bicarbonate ~ relyear + age_init + sex + htn + 
+                        dkd,
+                    random = ~ relyear | id,
+                    data = long_dt1train, na.action = na.omit,
+                    control = list(maxIter = 100, opt = "optim"))
+summary(bicarb_model)
+
+bicarb_model1 <- update(bicarb_model,
+                        fixed. = bicarbonate ~ relyear + I(relyear^2) + 
+                            age_init + sex + htn + dkd)
+```
+bicarb_model had the lowest AIC
+```{r serum alb model}
+alb_model <- lme(albumin ~ relyear + age_init + sex + htn + 
+                        dkd + gn,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(alb_model)
+
+alb_model1 <- update(alb_model,
+                     fixed. = albumin ~ relyear + I(relyear^2) + 
+                         age_init + sex + htn + 
+                        dkd + gn)
+```
+alb_model1 had the lowest AIC
+```{r magnesium model}
+mg_model <- lme(magnesium ~ relyear + age_init + sex + dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(mg_model)
+
+mg_model1 <- update(mg_model,
+                    fixed. = magnesium ~ relyear + I(relyear^2) + age_init + 
+                        sex + dkd)
+```
+mg_model had the lowest AIC
+```{r alkphos model}
+alk_model <- lme(alkphos ~ relyear + age_init + sex + htn + 
+                        dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(alk_model)
+
+alk_model1 <- update(alk_model,
+                     fixed. = alkphos ~ relyear + I(relyear^2) + age_init + 
+                         sex + htn + 
+                        dkd)
+```
+alk_model1 had the lowest AIC
+```{r na model}
+na_model <- lme(sodium ~ relyear + age_init + sex + htn + 
+                        dkd,
+                random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(na_model)
+
+na_model1 <- update(na_model,
+                    fixed. = sodium ~ relyear + I(relyear^2) + age_init + 
+                        sex + htn + 
+                        dkd)
+```
+na_model had the lowest AIC
+```{r k model}
+k_model <- lme(potassium ~ relyear + age_init + sex + htn + dkd,
+               random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(k_model)
+
+k_model1 <- update(k_model, 
+                   fixed. = potassium ~ relyear + I(relyear^2) + age_init + 
+                       sex + htn + dkd)
+```
+k_model1 had the lowest AIC
+```{r chloride model}
+cl_model <- lme(chloride ~ relyear + age_init + sex + htn + dkd,
+               random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit,
+               control = list(maxIter = 100, opt = "optim"))
+summary(cl_model)
+
+cl_model1 <- update(cl_model,
+                    fixed. = chloride ~ relyear + I(relyear^2) + age_init + 
+                        sex + htn + dkd)
+```
+cl_model had the lowest AIC
+```{r urate model}
+urate_model <- lme(urate ~ relyear + age_init + sex + htn + dkd,
+                   random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(urate_model)
+
+urate_model1 <- update(urate_model,
+                       fixed. = urate ~ relyear + I(relyear^2) + 
+                           age_init + sex + htn + dkd)
+```
+urate_model1 had the lowest AIC
+```{r pth model}
+pth_model <- lme(pth ~ relyear + age_init + sex + htn + dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(pth_model)
+
+pth_model1 <- update(pth_model,
+                     fixed. = pth ~ relyear + I(relyear^2) + age_init + 
+                         sex + htn + dkd)
+```
+pth_model1 had slightly better AIC. Hence, simpler pth_model was chosen
+```{r crp model}
+crp_model <- lme(crp ~ relyear + age_init + sex + htn + dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(crp_model)
+
+crp_model1 <- update(crp_model,
+                     fixed. = crp ~ relyear + I(relyear^2) + age_init + 
+                         sex + htn + dkd)
+```
+crp_model had the lowest AIC
+```{r hb model}
+hb_model <- lme(haemoglobin ~ relyear + age_init + sex + htn + dkd,
+                random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(hb_model)
+
+hb_model1 <- update(hb_model,
+                    fixed. = haemoglobin ~ relyear + I(relyear^2) + age_init +
+                        sex + htn + dkd)
+```
+hb_model1 had the lowest AIC
+```{r plt model}
+plt_model <- lme(platelet ~ relyear + age_init + sex + htn + dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(plt_model)
+
+plt_model1 <- update(plt_model,
+                     fixed. = platelet ~ relyear + I(relyear^2) + age_init + 
+                         sex + htn + dkd)
+```
+plt_model had the lowest AIC
+```{r bmi model}
+bmi_model <- lme(bmi ~  relyear + age_init + sex + htn + dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(bmi_model)
+
+bmi_model1 <- update(bmi_model,
+                     bmi ~  relyear + I(relyear^2) + age_init + sex + 
+                         htn + dkd)
+```
+bmi_model had the lowest AIC
+```{r diff sys/ diff dia model}
+diff_sys_model <- lme(diff_sys ~ relyear + age_init + sex + htn + dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(diff_sys_model)
+
+diff_dia_model <- lme(diff_dia ~ relyear + age_init + sex + htn + dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(diff_dia_model)
+```
+The residual was very high - variation within the longitudinal data
+```{r glucose model}
+glu_model <- lme(glucose ~ relyear + age_init + dkd,
+                 random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(glu_model)
+
+glu_model1 <- update(glu_model,
+                     fixed. = glucose ~ relyear + I(relyear^2) + age_init + dkd)
+```
+glu_model had the lowest AIC
+```{r neut model}
+neut_model <- lme(neutrophils ~ relyear + age_init +  sex + htn + dkd + gn,
+                  random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit)
+summary(neut_model)
+
+neut_model1 <- update(neut_model,
+                      fixed. = neutrophils ~ relyear + dkd)
+
+neut_model2 <- update(neut_model,
+                      neutrophils ~ relyear + I(relyear^2) + dkd)
+```
+neut_model1 had the lowest AIC
+```{r lymph model}
+lymph_model <- lme(lymphocytes ~ relyear + age_init +  sex + htn + dkd + gn,
+                  random = ~ relyear | id,
+                 data = long_dt1train, na.action = na.omit,
+                 control = list(maxIter = 100, opt = "optim"))
+summary(lymph_model)
+
+lymph_model1 <- update(lymph_model,
+                       fixed. = lymphocytes ~ relyear + age_init + sex)
+
+lymph_model2 <- update(lymph_model,
+                       fixed. = lymphocytes ~ relyear + I(relyear^2) + 
+                           age_init + sex)
+```
+lymph_model had the lowest AIC

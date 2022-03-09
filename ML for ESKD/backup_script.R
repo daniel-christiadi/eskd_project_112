@@ -215,3 +215,142 @@ dt_2y <- dt_2y %>%
     mutate(duration = duration-2,
            duration_comp = duration_comp-2)
 fwrite(dt_2y, "dt_2y.gz")
+
+
+# set.seed(seed)
+# covs1 <- model.matrix(~ htn + dkd + gn + gender + age_init + 
+#                              value_egfr_init, data = short_dt1_train)[, -1]
+# 
+# crr_model <- crr(ftime = short_dt1_train$time, 
+#                  fstatus = short_dt1_train$event, 
+#                  cov1 = covs1, cencode = "censored", 
+#                  failcode = "eskd")
+# summary(crr_model)
+# 
+# 
+# surv_model <- coxph(Surv(time = time, event = event) ~ htn + dkd + gn + 
+#                         gender + age_init + value_egfr_init,
+#                     data = short_dt1_train, id = id)
+# summary(surv_model)
+
+
+long_model1 <- lme(egfr ~ relyear + age_init,
+                   random = ~ 1| id,
+                   data = long_dt1_train, na.action = na.omit)
+summary(long_model1)
+
+long_model1a <- lme(egfr ~ relyear + age_init,
+                    random = ~ relyear| id,
+                    data = long_dt1_train, na.action = na.omit,
+                    control = list(maxIter = 100, opt = "optim"))
+summary(long_model1a)
+
+long_model2 <- lme(egfr ~ relyear + age_init + gender,
+                   random = ~ 1| id,
+                   data = long_dt1_train, na.action = na.omit)
+summary(long_model2)
+
+long_model2a <- lme(egfr ~ relyear + age_init + gender,
+                    random = ~ relyear| id,
+                    data = long_dt1_train, na.action = na.omit,
+                    control = list(maxIter = 100, opt = "optim"))
+summary(long_model2a)
+
+long_model3 <- lme(egfr ~ relyear + age_init + gender + htn,
+                   random = ~ 1| id,
+                   data = long_dt1_train, na.action = na.omit)
+summary(long_model3)
+
+long_model4 <- lme(egfr ~ relyear + age_init + gender + htn + dkd,
+                   random = ~ 1| id,
+                   data = long_dt1_train, na.action = na.omit)
+summary(long_model4)
+
+long_model5 <- lme(egfr ~ relyear + age_init + gender + htn + dkd + gn,
+                   random = ~ 1| id,
+                   data = long_dt1_train, na.action = na.omit,
+                   control = list(maxIter = 100, opt = "optim"))
+summary(long_model5)
+
+long_model5a <- lme(egfr ~ relyear + age_init + gender + htn + dkd + gn,
+                    random = ~ relyear| id,
+                    data = long_dt1_train, na.action = na.omit,
+                    control = list(maxIter = 100, opt = "optim"))
+summary(long_model5a)
+
+long_model6 <- lme(egfr ~ relyear + I(relyear^2) + age_init + 
+                       gender + htn + dkd + gn,
+                   random = ~ 1| id,
+                   data = long_dt1_train, na.action = na.omit,
+                   control = list(maxIter = 100, opt = "optim"))
+summary(long_model6)
+
+long_model6a <- lme(egfr ~ relyear + I(relyear^2) + 
+                        age_init + gender + htn + dkd + gn,
+                    random = ~ relyear | id,
+                    data = long_dt1_train, na.action = na.omit,
+                    control = list(maxIter = 100, opt = "optim"))
+summary(long_model6a)
+
+long_model6a1 <- lme(egfr ~ relyear + I(relyear^2) + 
+                         age_init + gender + htn + dkd + gn,
+                     random = ~ relyear + age_init | id,
+                     data = long_dt1_train, na.action = na.omit,
+                     control = list(maxIter = 100, opt = "optim"))
+summary(long_model6a1)
+
+long_model6a2 <- lme(egfr ~ relyear + I(relyear^2) + 
+                         age_init + gender + htn + dkd + gn,
+                     random = ~ relyear + gender | id,
+                     data = long_dt1_train, na.action = na.omit,
+                     control = list(maxIter = 100, opt = "optim"))
+summary(long_model6a2)
+
+long_model6a3 <- lme(egfr ~ relyear + I(relyear^2) + 
+                         age_init + gender + htn + dkd + gn,
+                     random = ~ relyear + gender + htn | id,
+                     data = long_dt1_train, na.action = na.omit,
+                     control = list(maxIter = 100, opt = "optim"))
+summary(long_model6a3)
+
+long_model6a4 <- lme(egfr ~ relyear + I(relyear^2) + 
+                         age_init + gender + htn + dkd + gn,
+                     random = ~ relyear + htn | id,
+                     data = long_dt1_train, na.action = na.omit,
+                     control = list(maxIter = 100, opt = "optim"))
+summary(long_model6a4)
+
+long_model6a5 <- lme(egfr ~ relyear + I(relyear^2) + 
+                         age_init + gender + htn + dkd + gn,
+                     random = ~ relyear + dkd | id,
+                     data = long_dt1_train, na.action = na.omit,
+                     control = list(maxIter = 100, opt = "optim"))
+summary(long_model6a5)
+
+# long_model6a7 <- lme(egfr ~ relyear + I(relyear^2) + 
+#                          age_init + gender + htn + dkd + gn,
+#                    random = ~ relyear + gn | id,
+#                    data = long_dt1_train, na.action = na.omit,
+#                    control = list(maxIter = 100, opt = "optim"))
+# summary(long_model6a7)
+
+long_model6a8 <- lme(egfr ~ relyear + I(relyear^2) + 
+                         age_init + gender + htn + dkd + gn,
+                     random = ~ relyear + htn + dkd | id,
+                     data = long_dt1_train, na.action = na.omit,
+                     control = list(maxIter = 100, opt = "optim"))
+summary(long_model6a8)
+
+long_model6a9 <- lme(egfr ~ relyear + I(relyear^2) + 
+                         age_init + gender + htn + dkd + gn,
+                     random = ~ relyear + gender + htn + dkd | id,
+                     data = long_dt1_train, na.action = na.omit,
+                     control = list(maxIter = 100, opt = "optim"))
+summary(long_model6a9)
+
+# long_model6a10 <- lme(egfr ~ relyear + I(relyear^2) + 
+#                          age_init + gender + htn + dkd + gn,
+#                    random = ~ relyear + gender + htn + dkd + gn| id,
+#                    data = long_dt1_train, na.action = na.omit,
+#                    control = list(maxIter = 100, opt = "optim"))
+# summary(long_model6a10)
