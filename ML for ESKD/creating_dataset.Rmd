@@ -7,9 +7,8 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
-libraries <- c('readxl', 'tidyverse', 'broom', 'janitor', 'outliers', 'skimr', 
-               'plotly', 'heatmaply', 'shiny', 'data.table', 
-               'gtsummary', 'lubridate')
+libraries <- c('readxl', 'tidyverse', 'janitor', 'skimr', 'heatmaply', 'shiny',
+               'data.table', 'gtsummary', 'lubridate')
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -213,23 +212,6 @@ ca <- pathology %>%
     filter(test == "Calcium, serum") %>% 
     filter(value < 10, value != 0) %>% 
     select(id:value)
-
-# dt <- pathology %>% 
-#     filter(test %in% c('Ca, adj', "Calcium, serum")) %>% 
-#     filter(value < 10) %>% # removing likely false data 
-#     pivot_wider(id_cols = c("id", "date"),
-#                 names_from = test,
-#                 values_from = value,
-#                 values_fn = mean)
-# setnames(dt, old = "Ca, adj", new = "adj_ca")
-# setnames(dt, old = "Calcium, serum", new = "serum_ca")
-# 
-# ca <- dt %>% 
-#     mutate(test = if_else(is.na(adj_ca), serum_ca, adj_ca)) %>% 
-#     filter(test > 0) %>% 
-#     rename(value = test) %>%
-#     mutate(test = "calcium") %>% 
-#     select(id, date, test, value)
 
 # test name Phosphorus, serum (mmol/L)
 phosph <- pathology %>% 
@@ -1079,7 +1061,7 @@ bmi_posturals <- dt %>%
 
 ```{r compiling clinico-pathological data}
 melted <- na.omit(unique(rbindlist(
-    list(alb, albcreat, alkphos, alt, baso, bicarb, bili, ca_adj, chloride, 
+    list(alb, albcreat, alkphos, alt, baso, bicarb, bili, ca, ca_adj, chloride, 
          creatinine, crp, egfr, eosin, esr, ferritin, ggt, globulin, 
          glucose, hb, hba1c, hct, iron, lymph, mch, mchc, mcv, mg, monocyte,
          neut, phosph, platelet, potassium, protcreat, protein, pth, rbc, rdw, 
@@ -1088,7 +1070,7 @@ melted <- na.omit(unique(rbindlist(
 saveRDS(melted, file = 'melted.RDS')
 ```
 Extracting from lab_results (raw text), there were 10577 distinct IDs. While, from pathology, there were 10,564 distinct IDs. From the eGFR perspective (new extraction), there were 9,700 distinct IDs.
-We had extracted 15,433 distinct IDs while Melted had 10198 distinct IDs (based on test == "egfr"). 
+We had extracted 15,481 distinct IDs while Melted had 10198 distinct IDs (based on test == "egfr"). 
 ```{r demographic data and modality}
 patient <- read_excel("~/PhD Project 1/ML for ESKD/new_pathology.xlsx",
                  sheet = "IDs", na = "NULL",
@@ -1149,6 +1131,7 @@ mp_mcgn <- tibble(unified_diag = "mp_mcgn",
                             'Mesangiocapillary glomerulonephritis',
                             'Mesangiocapillary glomerulonephritis, type I',
                             'Mesangiocapillary glomerulonephritis, type II'))
+
 anca <- tibble(unified_diag = "anca",
               diagnosis = c('Eosinophilc Granulomatosis with Polyangiitis',
                             'Granulomatous Polyangiitis', 
@@ -1223,14 +1206,8 @@ eskd_event <- modality %>%
     ungroup() %>% 
     select(id, start, modality)
 ```
-There were 15 IDs without baseline demographics (sex and birthyear) and 500 IDs with pre-existing ESKD (Hx of ESKD before initial eGFR). 
+There were 15 IDs without baseline demographics (sex and birthyear) and 500 IDs with pre-existing ESKD (Hx of ESKD before initial eGFR). Hence, a total of 9683 IDs for outcome_dt
 ```{r outcome and feature dataset}
-# melted %>% 
-#     filter(test == "egfr") %>% 
-#     left_join(y = patient, by = "id") %>% 
-#     mutate(age_init = year(date) - birth_year) %>%
-#     filter(age_init < 17)
-
 initial_egfr <- melted %>%
     filter(test == "egfr") %>% 
     group_by(id) %>% 
@@ -1294,23 +1271,32 @@ outcome_dt <- dt %>%
     rename(eskd_date = modality_corrected_eskd_date) %>% 
     relocate(eskd_date, .before = death_date)
 
-feature_dt <- outcome_dt %>% 
-    select(id, date_egfr_init) %>% 
+dt <- outcome_dt %>%
+    select(id, date_egfr_init) %>%
     right_join(y = melted, by = c("id")) %>% 
-    mutate(relyear = as.duration(date - date_egfr_init)/dyears(1)) %>% 
+    as.data.table()
+
+dt[, ":="(resample_date = floor_date(date, unit = "month"),
+          resample_egfr_init = floor_date(date_egfr_init, unit = "month"))] %>% 
+    .[, by = c("id", "test", "resample_date"), monthly_value := mean(value)]
+
+feature_dt <- dt %>% 
+    select(id, resample_date, resample_egfr_init, test, monthly_value) %>% 
+    distinct() %>% 
+    mutate(relyear = as.duration(resample_date-resample_egfr_init)/dyears(1)) %>% 
     filter(relyear >= 0) %>% 
-    select(-date_egfr_init)
-
-# fwrite(outcome_dt, 'outcome_data.gz')
-# fwrite(feature_dt, 'feature_data.gz')
-
+    select(id, test, monthly_value, relyear) %>% 
+    arrange(id, relyear) %>% 
+    rename(value = monthly_value)
+# fwrite(outcome_dt, "outcome_data.gz")
+# fwrite(feature_dt, "feature_data_resample.gz")
 ```
 There were 577 IDs who developed ESKD within 0.2 years with initial eGFR (median 10, IQR 6.54 to 13.5) and 2 IDs who died less than 0.01 years (~3 days). Hence, a total of 9104 IDs for further analysis
 ```{r meta dataset}
 dt <- outcome_dt %>% 
     mutate(follow_up = as.duration(extraction_date - date_egfr_init)/dyears(1),
            eskd_fu = as.duration(eskd_date - date_egfr_init)/dyears(1),
-           death_fu = as.duration(death_date - date_egfr_init)/dyears(1)) %>%
+           death_fu = as.duration(death_date - date_egfr_init)/dyears(1)) %>% 
     filter(death_fu > 0 | is.na(death_fu), 
            eskd_fu > 0.2 | is.na(eskd_fu)) %>% 
     mutate(time_eskd = case_when(
@@ -1319,89 +1305,40 @@ dt <- outcome_dt %>%
         TRUE ~ eskd_fu
     ),
     status_eskd = if_else(
-        time_eskd == eskd_fu, 1, 0, missing = 0
+        time_eskd == eskd_fu, "eskd", "no", missing = "no"
     )) %>% 
     mutate(time_compete = pmin(follow_up, eskd_fu, death_fu, na.rm = TRUE),
            status_compete = case_when(
-               time_compete == eskd_fu ~ 1,
-               time_compete == death_fu ~ 2,
-               time_compete == follow_up ~ 0
+               time_compete == eskd_fu ~ "eskd",
+               time_compete == death_fu ~ "death",
+               time_compete == follow_up ~ "censored"
            ))
-# poor glucose diagnosis
-poor_glucose <- feature_dt %>% 
-    select(id, test, value, relyear) %>% 
-    filter(test == "glucose") %>% 
-    right_join(select(dt, id, time_compete), by = c("id")) %>% 
-    filter(relyear <= time_compete, value >= 11.1) %>% 
-    distinct(id)
 
-poor_hba1c <- feature_dt %>% 
-    select(id, test, value, relyear) %>% 
-    filter(test == "hba1c") %>% 
-    right_join(select(dt, id, time_compete), by = c("id")) %>% 
-    filter(relyear <= time_compete, value >= 6.5) %>% 
-    distinct(id)
-
-diabetes <- poor_glucose %>% 
-    bind_rows(poor_hba1c) %>% 
-    distinct(id) %>% 
-    mutate(dkd = "yes")
-
-poor_systolic <- feature_dt %>% 
-    select(id, test, value, relyear) %>% 
-    filter(test %in% c("sitsys", "stasys")) %>% 
-    right_join(select(dt, id, time_compete), by = c("id")) %>% 
-    filter(relyear <= time_compete, value >= 140) %>% 
-    distinct(id)
-
-poor_diastolic <- feature_dt %>% 
-    select(id, test, value, relyear) %>% 
-    filter(test %in% c("sitdias", "stadias")) %>% 
-    right_join(select(dt, id, time_compete), by = c("id")) %>% 
-    filter(relyear <= time_compete, value >= 90) %>% 
-    distinct(id)
-
-hypertension <- poor_systolic %>% 
-    bind_rows(poor_diastolic) %>% 
-    distinct(id) %>% 
-    mutate(htn = "yes")
-    
 meta_dt <- dt %>% 
     left_join(y = gn, by = c("id")) %>% 
-    left_join(y = diabetes, by = c("id")) %>% 
-    left_join(y = hypertension, by = c("id")) %>% 
     rename(gn = diagnosis) %>% 
-    relocate(gn:htn, .after = age_init) %>% 
-    replace_na(list(gn = "no", dkd = "no", htn = "no")) %>% 
-    left_join(select(feature_dt, id, test, value:relyear), by = c("id")) %>% 
-    relocate(relyear, .after = id) %>% 
-    relocate(test:value, .after = relyear) %>% 
-    select(-date_egfr_init)
-
-short_dt <- meta_dt %>% 
-    select(id, value_egfr_init:status_compete) %>% 
-    distinct()
-saveRDS(short_dt, "short_dt.RDS")
-
-long_dt <- meta_dt %>% 
-    select(id:value) %>% 
-    mutate(new_relyear = round(relyear, digits = 1)) %>% 
-    select(id, new_relyear, test, value) %>% 
-    rename(relyear = new_relyear) %>% 
-    arrange(id, relyear) 
-
-saveRDS(long_dt, "long_dt.RDS")
+    relocate(gn, .after = age_init) %>% 
+    replace_na(list(gn = "no")) %>% 
+    mutate(gn_cat = if_else(gn == "no", "no", "yes")) %>% 
+    relocate(gn_cat, .after = gn) %>% 
+    left_join(select(feature_dt, id:relyear), by = c("id")) %>% 
+    relocate(test:relyear, .after = id) %>% 
+    filter(relyear < time_compete)
+saveRDS(meta_dt, "meta.RDS")
 ```
 
-```{r finding IDs with reasonable data density}
-test_list <- long_dt %>% 
+```{r counting clinico-pathology frequency}
+test_list <- meta_dt %>%
+    select(id, test:relyear) %>% 
     count(test) %>% 
     pull(test)
 
-id_dt <- short_dt %>% 
-    select(id) %>% as.data.table()
+id_dt <- meta_dt %>% 
+    select(id) %>% 
+    distinct() %>% as.data.table()
 
-dt <- long_dt %>% 
+dt <- meta_dt %>%
+    select(id:relyear) %>% 
     as.data.table()
 
 for (test_name in test_list){
@@ -1412,34 +1349,48 @@ for (test_name in test_list){
     id_dt <- n[id_dt]
 }
 ```
+From 9104 IDs, only 5315 IDs had at least 3 eGFR. Of this 5315, 845 (15.89%) had ESKD and 916 (17.23%) died. 
 
-``` {r data density heatmap, echo=FALSE, include=FALSE eval=FALSE}
-id_dt[, id := NULL]
-id_dt[is.na(id_dt)] <- 0
+When we enforced additional restriction on 5315 IDs:
+Dense3 had 4263 IDs with 607 (14.23%) ESKD and 716 (16.79%) death.
+Tangri3 had a total 2685 IDs with 294 (10.94%) ESKD and 283 (10.54%) death.
+```{r creation of dataset}
+egfr3_id <- id_dt[egfr >=3, id]
 
-heatmap_breaks<-c(0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)
-heatmaply(x = t(as.matrix(id_dt)), ylab = 'Features', xlab = 'Patients', 
-          main = 'Data Density of Clinico-Pathological Data of All Patients',
-          dist_method = 'manhattan', hclust_method = 'ward.D2',
-          Rowv = TRUE, Colv = TRUE, dendrogram = 'both', 
-          showticklabels = c(FALSE, TRUE), 
-          scale_fill_gradient_fun = scale_fill_viridis(trans='sqrt', 
-                                                       breaks=heatmap_breaks,
-                                                       labels=heatmap_breaks, 
-                                                       option = 'B', 
-                                                       direction = -1,
-                                                       na.value='white')) 
-     
+dense3_id <- id_dt %>% 
+    filter(egfr >= 3) %>% 
+    select(id, albumin, alkphos, bicarb, calcium, chloride, glucose, 
+           haemoglobin, phosphate, platelet, potassium, sodium, urea, wcc) %>% 
+    filter(if_all(.fns = ~ . >=3)) %>% 
+    pull(id)
+
+tangri3_id <- id_dt %>% 
+    filter(egfr >= 3) %>% 
+    select(id, albcreat_ratio, albumin, phosphate, bicarb, adjca) %>% 
+    filter(if_all(.fns = ~. >=3)) %>% 
+    pull(id)
 ```
-From 9104 IDs, 4466 IDs had two or more albumin/creatinine ratio and eGFR. While, there were 7120 IDs with eGFR >= 2.
-```{r dataset based on ACR>2 and eGFR>2}
-acrbased_dt <- id_dt[albcreat_ratio >=2 & egfr >=2, ]
-acrbased_dt[, id:=NULL]
-acrbased_dt[is.na(acrbased_dt)] <- 0    
+
+```{r assessing outcome based on filtered ids}
+events_freq <- function(id){
+    meta_dt %>% 
+        filter(id %in% {{id}}) %>% 
+        select(id, status_compete) %>% 
+        distinct() %>% 
+        count(status_compete)
+}
+
+events_freq(egfr3_id)
+```
+
+```{r creating heatmap of data density, eval=FALSE}
+dt <- id_dt[id %chin% dense3_id,]
+dt[, id:=NULL]
+dt[is.na(dt)] <- 0    
 
 heatmap_breaks<-c(0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)
-heatmaply(x = t(as.matrix(acrbased_dt)), ylab = 'Features', xlab = 'Patients', 
-          main = 'Data Density of Clinico-Pathological Data of Patients with eGFR>=2 and ACR>=2',
+heatmaply(x = t(as.matrix(dt)), ylab = 'Features', xlab = 'Patients', 
+          main = 'Data Density of Clinico-Pathological Data of Patients in Dense3 IDs',
           dist_method = 'manhattan', hclust_method = 'ward.D2',
           Rowv = TRUE, Colv = TRUE, dendrogram = 'both', 
           showticklabels = c(FALSE, TRUE), 
@@ -1449,14 +1400,19 @@ heatmaply(x = t(as.matrix(acrbased_dt)), ylab = 'Features', xlab = 'Patients',
                                                        option = 'B', 
                                                        direction = -1,
                                                        na.value='white'))
-
-acrbased_id <- id_dt[albcreat_ratio >=2 & egfr >=2, id]
-
-acrbased_short <- short_dt %>% 
-    filter(id %in% acrbased_id)
-saveRDS(acrbased_short, "acrbased_short.RDS")
-
-acrbased_long <- long_dt %>% 
-    filter(id %in% acrbased_id)
-saveRDS(acrbased_long, "acrbased_long.RDS")
 ```
+
+```{r explore dataset for imputation}
+dt <- meta_dt %>% 
+    filter(id %in% tangri3_id) %>% 
+    select(-date_egfr_init)
+saveRDS(dt, "tangri3.RDS")
+
+dt <- dt %>% 
+    pivot_wider(id_cols = c("id", "relyear"),
+                names_from = test,
+                values_from = value)
+
+test <- setDT(dt)[, lapply(.SD, function(x) mean(is.na(x))), by = id]
+```
+
