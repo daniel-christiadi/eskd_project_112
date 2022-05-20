@@ -1,7 +1,7 @@
 ---
 title: "training"
 author: "Daniel Christiadi"
-date: "28/10/2021"
+date: 
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -92,14 +92,14 @@ longtrain1_dt <- longtrain1_dt %>%
 ```
 
 ```{r function to create base linear model}
-# model0 <- function(y_name, dataset){
-#     lmm_formula <- reformulate(termlabels = "relyear" ,
-#                                response = y_name, intercept = TRUE)
-#     lme(lmm_formula, 
-#         random = ~ relyear|id,
-#         data = dataset, na.action = na.omit,
-#         )
-# }
+model0 <- function(y_name, dataset){
+    lmm_formula <- reformulate(termlabels = "relyear" ,
+                               response = y_name, intercept = TRUE)
+    lme(lmm_formula,
+        random = ~ relyear|id,
+        data = dataset, na.action = na.omit,
+        )
+}
 # 
 # model1 <- function(y_name, dataset){
 #     group_variables <- c("relyear", "age_init", "sex", "gn")

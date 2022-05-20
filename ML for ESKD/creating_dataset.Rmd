@@ -7,7 +7,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
-libraries <- c('readxl', 'tidyverse', 'janitor', 'skimr', 'heatmaply', 'shiny',
+libraries <- c('readxl', 'tidyverse', 'janitor', 'skimr', 'heatmaply', 
                'data.table', 'gtsummary', 'lubridate')
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
@@ -1059,7 +1059,7 @@ bmi_posturals <- dt %>%
                  values_to = "value")
 ```
 
-```{r compiling clinico-pathological data}
+```{r compilation of clinico-pathological data}
 melted <- na.omit(unique(rbindlist(
     list(alb, albcreat, alkphos, alt, baso, bicarb, bili, ca, ca_adj, chloride, 
          creatinine, crp, egfr, eosin, esr, ferritin, ggt, globulin, 
@@ -1369,9 +1369,19 @@ tangri3_id <- id_dt %>%
     select(id, albcreat_ratio, albumin, phosphate, bicarb, adjca) %>% 
     filter(if_all(.fns = ~. >=3)) %>% 
     pull(id)
+
+dt <- meta_dt %>% 
+    filter(id %in% dense3_id) %>% 
+    select(-date_egfr_init)
+saveRDS(dt, "dense3.RDS")
+
+dt <- meta_dt %>% 
+    filter(id %in% tangri3_id) %>% 
+    select(-date_egfr_init)
+saveRDS(dt, "tangri3.RDS")
 ```
 
-```{r assessing outcome based on filtered ids}
+```{r function to assess outcome based on filtered ids}
 events_freq <- function(id){
     meta_dt %>% 
         filter(id %in% {{id}}) %>% 
@@ -1383,7 +1393,7 @@ events_freq <- function(id){
 events_freq(egfr3_id)
 ```
 
-```{r creating heatmap of data density, eval=FALSE}
+```{r heatmap of data density, eval=FALSE}
 dt <- id_dt[id %chin% dense3_id,]
 dt[, id:=NULL]
 dt[is.na(dt)] <- 0    
@@ -1400,19 +1410,5 @@ heatmaply(x = t(as.matrix(dt)), ylab = 'Features', xlab = 'Patients',
                                                        option = 'B', 
                                                        direction = -1,
                                                        na.value='white'))
-```
-
-```{r explore dataset for imputation}
-dt <- meta_dt %>% 
-    filter(id %in% tangri3_id) %>% 
-    select(-date_egfr_init)
-saveRDS(dt, "tangri3.RDS")
-
-dt <- dt %>% 
-    pivot_wider(id_cols = c("id", "relyear"),
-                names_from = test,
-                values_from = value)
-
-test <- setDT(dt)[, lapply(.SD, function(x) mean(is.na(x))), by = id]
 ```
 

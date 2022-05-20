@@ -1,18 +1,36 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: "Exploratory Data Analysis"
+author: "Daniel Christiadi"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
-
-```{r}
-plot(cars)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
+libraries <- c('tidyverse', 'janitor', 'skimr', 'heatmaply', 'data.table', 
+               'gtsummary', 'lubridate')
+installed <- installed.packages()[,'Package']
+new.libs <- libraries[!(libraries %in% installed)]
+if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
+                                      dependencies=TRUE)
+lib.ok <- sapply(libraries, require, character.only=TRUE)
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+## Demographic Characteristic
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+```{r}
+dt <- read_rds("dense3.RDS")
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+dt %>% 
+    distinct(id, .keep_all = TRUE) %>% 
+    select(sex, age_init, gn, value_egfr_init, status_compete) %>% 
+    tbl_summary(label = list(sex ~ "Gender", age_init ~ "Age at Presentation", 
+                             gn ~ "GN Diagnosis", 
+                             value_egfr_init ~ "Initial eGFR (mL/min/1.73m2)",
+                             status_compete ~ "Events")) %>% 
+    modify_header(label ~ "**Variable**")
+```
+
+## 

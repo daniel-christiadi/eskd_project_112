@@ -1,0 +1,140 @@
+---
+title: "landmarking_lme"
+author: "Daniel Christiadi"
+date: "20/05/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
+libraries <- c("tidyverse", "data.table", "skimr", "nlme", "dynpred", "prodlim", 
+               "mice", "randomForestSRC", "pec", "ggsci")
+installed <- installed.packages()[,'Package']
+new.libs <- libraries[!(libraries %in% installed)]
+if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
+                                      dependencies=TRUE)
+lib.ok <- sapply(libraries, require, character.only=TRUE)
+
+cross_val <- 5
+seed <- 7
+predict_horizon <- 2 #5
+landmark <- c(0.5, 1, 1.5, 2, 2.5, 3)
+
+longi_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride", 
+                "egfr", "glucose", "haemoglobin", "phosphate", "platelet", 
+                "potassium", "sodium", "wcc") #"urea"
+
+base_cov <- c("sex", "age_init", "gn_cat") #"value_egfr_init", 
+```
+
+```{r k-fold}
+dt <- read_rds("dense3.RDS")
+
+dt <- dcast(dt, 
+      id + relyear + value_egfr_init + sex + age_init + gn_cat + time_compete +
+          status_compete ~ test, value.var = "value")
+
+dt <- dt %>% 
+    mutate(status_compete_num = case_when(
+      status_compete == "censored" ~ 0,
+      status_compete == "eskd" ~ 1,
+      TRUE ~ 2
+    )) %>% 
+    relocate(status_compete_num, .after = status_compete) %>% 
+    mutate(sex = factor(sex, levels = c("Female", "Male")),
+           gn_cat = factor(gn_cat, levels = c("no", "yes")))
+
+set.seed(seed)
+
+folds <- dt %>% 
+    select(id, value_egfr_init:status_compete) %>% 
+    distinct(id, .keep_all = TRUE) %>% 
+    rsample::vfold_cv(v = cross_val, strata = "status_compete")
+```
+
+```{r function to perform linear mixed model}
+base_lmm_model <- function(y_name, dataset){
+    lmm_formula <- as.formula(str_c({{y_name}},
+                       str_c(c("relyear",base_cov), collapse = " + "), 
+                       sep = "~"))
+    lmm_formula <- update(lmm_formula, .~. + relyear:sex + relyear:age_init + relyear:gn_cat)
+    
+    lme(lmm_formula,
+        random = ~ relyear|id,
+        data = dataset, na.action = na.exclude,
+        )
+}
+
+assign_value <- function(dataset, var_name, level_value, slope_value){
+    var_name_level <- str_c(var_name, "level", sep = "_")
+    var_name_slope <- str_c(var_name, "slope", sep = "_")
+    
+    dataset %>% 
+        mutate({{var_name_level}} := {{level_value}}) %>%
+        mutate({{var_name_slope}} := {{slope_value}})
+}
+```
+
+```{r linear mixed model}
+## start the fold loop here
+train_id <- folds$splits[[1]] %>% 
+        rsample::analysis() %>% 
+        pull(id)
+    
+test_id <- folds$splits[[1]] %>% 
+        rsample::assessment() %>% 
+        pull(id)
+
+train_dt <- dt[id %chin% train_id]
+test_dt <- dt[id %chin% test_id]
+
+## start the landmark loop here
+train_temp_dt <- cutLM(data = train_dt, outcome = list(time = "time_compete",
+                                              status = "status_compete_num"),
+                      LM = landmark[1], horizon = landmark[1] + predict_horizon,
+                      covs = list(fixed = base_cov),
+                      format = "long", id = "id", rtime = "relyear")
+
+train_temp_dt[, relyear := LM][,LM := NULL]
+
+train_lmm_dt <- train_dt[relyear < landmark[1] & time_compete > landmark[1]]
+
+test_temp_dt <- cutLM(data = train_dt, outcome = list(time = "time_compete",
+                                         status = "status_compete_num"),
+                      LM = landmark[1], horizon = landmark[1] + predict_horizon,
+                      covs = list(fixed = base_cov),
+                      format = "long", id = "id", rtime = "relyear")
+
+test_temp_dt[, relyear := LM][,LM := NULL]
+
+test_lmm_dt <- test_dt[relyear < landmark[1] & time_compete > landmark[1]]
+
+
+## start looping longi_cov here
+lmm_model <- base_lmm_model("egfr", train_lmm_dt)
+
+#extracting fixed and random coefficients
+b <- random.effects(lmm_model)
+sigma <- lmm_model$sigma
+D <- lapply(pdMatrix(lmm_model$modelStruct$reStruct), "*", sigma^2)[[1]]
+betas <- fixed.effects(lmm_model)
+
+X_temp <- model.matrix(~ relyear + sex + age_init + gn_cat + relyear*sex + 
+                           relyear*age_init + relyear*gn_cat, train_temp_dt)
+Z_temp <- model.matrix(~ relyear, train_temp_dt)
+
+level <- as.vector(c(X_temp %*% betas) + rowSums(Z_temp * b))
+
+X_temp_deriv <- model.matrix(~ sex + age_init + gn_cat, train_temp_dt)
+
+Z_temp_deriv <- model.matrix(~ 1, train_temp_dt)
+
+slope <- as.vector(c(X_temp_deriv %*% betas[c(2, 6, 7, 8)]) + 
+                                     rowSums(Z_temp_deriv * b[, 2, drop = FALSE]))
+
+train_temp_dt <- assign_value(train_temp_dt, var_name = "egfr", 
+                         level_value = level, slope_value = slope)
+
+```
