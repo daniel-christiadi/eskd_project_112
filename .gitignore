@@ -12,3 +12,8 @@ dask-worker-space
 ML for ESKD/*.gz
 ML for ESKD/*.xlsx
 ML for ESKD/*.tsv
+ML for ESKD/*.csv
+ML for ESKD/*.html
+ML for ESKD/*.txt
+ML for ESKD/cmv_analysis.Rmd
+

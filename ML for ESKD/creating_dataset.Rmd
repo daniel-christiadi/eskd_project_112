@@ -1,6 +1,8 @@
 ---
 title: "Preparing Dataset"
-output: html_notebook
+author: "Daniel Christiadi"
+date: "Compiled on `r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
 editor_options: 
   chunk_output_type: console
 ---

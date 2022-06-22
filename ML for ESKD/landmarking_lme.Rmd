@@ -1,7 +1,7 @@
 ---
 title: "landmarking_lme"
 author: "Daniel Christiadi"
-date: "20/05/2022"
+date: "Compiled on `r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -9,7 +9,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
-libraries <- c("tidyverse", "data.table", "skimr", "nlme", "dynpred", "prodlim", 
+libraries <- c("tidyverse", "data.table", "skimr", "lme4", "dynpred", "prodlim", 
                "mice", "randomForestSRC", "pec", "ggsci")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
@@ -55,16 +55,24 @@ folds <- dt %>%
 ```
 
 ```{r function to perform linear mixed model}
-base_lmm_model <- function(y_name, dataset){
-    lmm_formula <- as.formula(str_c({{y_name}},
+# base_lmm_model <- function(y_name, dataset){
+#     lmm_formula <- as.formula(str_c({{y_name}},
+#                        str_c(c("relyear",base_cov), collapse = " + "), 
+#                        sep = "~"))
+#     lme(lmm_formula,
+#         random = ~ relyear|id,
+#         data = dataset, na.action = na.exclude,
+#         control = list(msMaxIter = 1000, msMaxEval = 1000, maxIter = 1000))
+# }
+
+base_lmer_model <- function(y_name, dataset){
+    lmer_formula <- as.formula(str_c({{y_name}},
                        str_c(c("relyear",base_cov), collapse = " + "), 
                        sep = "~"))
-    lmm_formula <- update(lmm_formula, .~. + relyear:sex + relyear:age_init + relyear:gn_cat)
-    
-    lme(lmm_formula,
-        random = ~ relyear|id,
-        data = dataset, na.action = na.exclude,
-        )
+    lmer_formula <- update(lmer_formula, .~. + (relyear|id))
+    lmer(formula = lmer_formula, 
+         data = dataset, REML = TRUE,
+         na.action = "na.exclude")
 }
 
 assign_value <- function(dataset, var_name, level_value, slope_value){
@@ -90,51 +98,194 @@ test_id <- folds$splits[[1]] %>%
 train_dt <- dt[id %chin% train_id]
 test_dt <- dt[id %chin% test_id]
 
-## start the landmark loop here
-train_temp_dt <- cutLM(data = train_dt, outcome = list(time = "time_compete",
-                                              status = "status_compete_num"),
-                      LM = landmark[1], horizon = landmark[1] + predict_horizon,
-                      covs = list(fixed = base_cov),
-                      format = "long", id = "id", rtime = "relyear")
+# long_train <- train_dt %>%
+#         select(id, relyear, !!longi_cov)
+#  
+# ## imputing covariates at relyear == 0   
+# impute_dt <- long_train %>% 
+#     filter(relyear == 0)
+# temp_dt <- mice(impute_dt, m = 1, maxit = 50, method = "pmm", seed = seed)
+# impute_dt <- complete(temp_dt)
+# 
+# train_dt <- impute_dt %>% 
+#     bind_rows(long_train) %>% 
+#     arrange(id) %>% 
+#     distinct(id, relyear, .keep_all = TRUE)  %>% 
+#     left_join(select(train_dt, id:status_compete_num),
+#               by = c("id", "relyear")) %>% 
+#     arrange(id, relyear) %>% as.data.table()
 
-train_temp_dt[, relyear := LM][,LM := NULL]
+train_super_dt <- NULL
+test_super_dt <- NULL
 
-train_lmm_dt <- train_dt[relyear < landmark[1] & time_compete > landmark[1]]
-
-test_temp_dt <- cutLM(data = train_dt, outcome = list(time = "time_compete",
-                                         status = "status_compete_num"),
-                      LM = landmark[1], horizon = landmark[1] + predict_horizon,
-                      covs = list(fixed = base_cov),
-                      format = "long", id = "id", rtime = "relyear")
-
-test_temp_dt[, relyear := LM][,LM := NULL]
-
-test_lmm_dt <- test_dt[relyear < landmark[1] & time_compete > landmark[1]]
-
-
-## start looping longi_cov here
-lmm_model <- base_lmm_model("egfr", train_lmm_dt)
-
-#extracting fixed and random coefficients
-b <- random.effects(lmm_model)
-sigma <- lmm_model$sigma
-D <- lapply(pdMatrix(lmm_model$modelStruct$reStruct), "*", sigma^2)[[1]]
-betas <- fixed.effects(lmm_model)
-
-X_temp <- model.matrix(~ relyear + sex + age_init + gn_cat + relyear*sex + 
-                           relyear*age_init + relyear*gn_cat, train_temp_dt)
-Z_temp <- model.matrix(~ relyear, train_temp_dt)
-
-level <- as.vector(c(X_temp %*% betas) + rowSums(Z_temp * b))
-
-X_temp_deriv <- model.matrix(~ sex + age_init + gn_cat, train_temp_dt)
-
-Z_temp_deriv <- model.matrix(~ 1, train_temp_dt)
-
-slope <- as.vector(c(X_temp_deriv %*% betas[c(2, 6, 7, 8)]) + 
-                                     rowSums(Z_temp_deriv * b[, 2, drop = FALSE]))
-
-train_temp_dt <- assign_value(train_temp_dt, var_name = "egfr", 
-                         level_value = level, slope_value = slope)
-
+i <- 1
+# for (i in seq_along(landmark)){
+    train_temp_dt <- cutLM(data = train_dt, outcome = list(time = "time_compete",
+                                                  status = "status_compete_num"),
+                          LM = landmark[i], 
+                          horizon = landmark[i] + predict_horizon,
+                          covs = list(fixed = base_cov),
+                          format = "long", id = "id", rtime = "relyear")
+    
+    train_temp_dt[, relyear := LM][,LM := NULL]
+    
+    train_lmm_dt <- train_dt[id %in% train_temp_dt$id]
+    
+    test_temp_dt <- cutLM(data = test_dt, outcome = list(time = "time_compete",
+                                             status = "status_compete_num"),
+                          LM = landmark[i], 
+                          horizon = landmark[i] + predict_horizon,
+                          covs = list(fixed = base_cov),
+                          format = "long", id = "id", rtime = "relyear")
+    
+    test_temp_dt[, relyear := LM][,LM := NULL]
+    
+    test_lmm_dt <- test_dt[relyear < landmark[i] & time_compete > landmark[i]]
+    
+    for (variable in longi_cov){
+        lmer_model <- base_lmer_model(variable, train_lmm_dt)
+        b <- ranef(lmer_model)[[1]]
+        sigma <- sigma(lmer_model)
+        D <- VarCorr(lmer_model)$id
+        attr(D, c("stddev")) <- NULL
+        attr(D, c("correlation")) <- NULL
+        betas <- fixef(lmer_model)
+        
+        X_temp <- model.matrix(~ relyear + sex + age_init + gn_cat, train_temp_dt)
+        Z_temp <- model.matrix(~ relyear, train_temp_dt)
+        level <- as.vector(c(X_temp %*% betas) + rowSums(Z_temp * b))
+        X_temp_deriv <- model.matrix(~ 1, train_temp_dt)
+        Z_temp_deriv <- model.matrix(~ 1, train_temp_dt)
+        
+        slope <- as.vector(c(X_temp_deriv %*% betas[c(2)]) + 
+                               rowSums(Z_temp_deriv * b[ , 2, drop = FALSE]))
+        
+        train_temp_dt <- assign_value(train_temp_dt, var_name = variable, 
+                                 level_value = level, slope_value = slope)
+        
+        test_lmm_dt_temp <- na.omit(test_lmm_dt, variable)
+        
+        updated_test_temp_dt <- test_temp_dt %>% 
+            filter(id %in% test_lmm_dt_temp$id) %>% 
+            select(-(ends_with("level") | ends_with("slope")))
+        
+        X_long_pred_split <- split(data.frame(
+            model.matrix(~ relyear + sex + age_init + gn_cat, test_lmm_dt_temp)),
+            f = test_lmm_dt_temp$id)
+        
+        Z_long_pred_split <- split(data.frame(
+            model.matrix(~ relyear, test_lmm_dt_temp)), test_lmm_dt_temp$id)
+        
+        Y_pred <- split(test_lmm_dt_temp[[variable]], test_lmm_dt_temp$id)
+        
+        V_pred <- lapply(Z_long_pred_split, function(x){
+            as.matrix(x) %*% D %*% t(as.matrix(x)) + 
+                diag(sigma^2, nrow(as.matrix(x)))})
+        
+        b_pred <- lapply(seq_len(length(X_long_pred_split)), 
+                           function(i, x, y, z, v) { 
+                             D %*% t(as.matrix(z[[i]])) %*%
+                               solve(v[[i]]) %*% (y[[i]] - as.matrix(x[[i]]) %*% fixef(lmer_model))},
+                           x = X_long_pred_split, y = Y_pred, z = Z_long_pred_split, v = V_pred)
+        
+        b_pred <- matrix(unlist(b_pred), ncol = 2, byrow = TRUE)
+        
+        X_temp_pred <- model.matrix(~ relyear + sex + age_init + gn_cat, 
+                                    updated_test_temp_dt)
+        
+        Z_temp_pred <- model.matrix(~ relyear, updated_test_temp_dt)
+        
+        level <- as.vector(c(X_temp_pred %*% betas) + 
+                               rowSums(Z_temp_pred * b_pred))
+        
+        X_temp_pred_deriv <- model.matrix(~ 1, updated_test_temp_dt)
+        Z_temp_pred_deriv <- model.matrix(~ 1, updated_test_temp_dt)
+        
+        slope <- as.vector(c(X_temp_pred_deriv %*% betas[c(2)]) 
+                           + rowSums(Z_temp_pred_deriv * b_pred[ , 2, drop = FALSE]))
+        
+        updated_test_temp_dt <- assign_value(updated_test_temp_dt, 
+                                             var_name = variable,
+                                             level_value = level, 
+                                             slope_value = slope)
+        
+        test_temp_dt <- updated_test_temp_dt %>% 
+            select(id, ends_with("level"), ends_with("slope")) %>% 
+            right_join(test_temp_dt, by = "id")
+    }
+    train_super_dt <- rbind(train_super_dt, train_temp_dt)
+    test_super_dt <- rbind(test_super_dt, test_temp_dt)
+# }
 ```
+
+```{r}
+
+
+lmx <- 0.5
+
+model_vimp <- NULL
+
+model_cif <- NULL
+
+model_performance <- NULL
+
+# for (lmx in landmark){
+        # print(glue::glue("Processing landmark: {lmx}"))
+    
+train_lm <- train_super_dt %>% 
+    filter(relyear == lmx)
+
+test_lm <- test_super_dt %>% 
+    filter( == lmx) %>% 
+    drop_na()
+
+model_formula <- as.formula(str_c("Surv(time_compete, status_compete_num)",
+               str_c(c(base_cov, longi_cov), collapse = " + "), 
+               sep = "~"))
+
+tune_rsf <- tune.rfsrc(model_formula, data = train_lm, mtryStart = 1, 
+       ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)),
+       sampsize = 0.623 * (nrow(train_lm)), stepFactor = 1.5)
+
+rsf_model <- rfsrc(formula = model_formula, data = train_lm, ntree = 1000, 
+      splitrule = "logrankCR", importance = TRUE, statistics = TRUE, 
+      mtry = tune_rsf$optimal[[2]], nodesize = tune_rsf$optimal[[1]])
+
+vimp_temp <- data.table(LM = lmx,
+                    event = c("eskd", "death"))
+
+vimp_temp <- cbind(vimp_temp, 100*t(rsf_model$importance))
+
+model_vimp <- rbind(model_vimp, vimp_temp)
+
+column_cif <- sindex(jump.times = rsf_model$time.interest, 
+            eval.times = (lmx + predict_horizon))
+
+rsf_prediction <- predict.rfsrc(object = rsf_model,
+                     newdata = test_lm, na.action = "na.omit")
+
+cif_temp <- data.table(id = test_lm$id,
+                   LM = lmx,
+                   eskd_cif = rsf_prediction$cif[, column_cif, 1],
+                   death_cif = rsf_prediction$cif[, column_cif, 2])
+
+model_cif <- rbind(model_cif, cif_temp)
+
+brier_eskd <- pec(rsf_model, formula = model_formula, data = test_lm,
+                 cause = 1)
+
+brier_death <- pec(rsf_model, formula = model_formula, data = test_lm,
+                 cause = 2)
+
+error_temp <- unname(apply(rsf_prediction$err.rate, 2, sum, na.rm = TRUE))
+
+performance_temp <- data.table(LM = lmx,
+                           error_eskd = 100 * error_temp[1],
+                           error_death = 100 * error_temp[2],
+                           brier_eskd = crps(brier_eskd)[2],
+                           brier_death = crps(brier_death)[2])
+
+model_performance <- rbind(model_performance, performance_temp)
+# }
+```
+
