@@ -8,6 +8,7 @@ dask-worker-space
 *.RDS
 *.fst
 *.json
+*.png
 
 ML for ESKD/*.gz
 ML for ESKD/*.xlsx

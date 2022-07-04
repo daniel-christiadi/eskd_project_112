@@ -9,8 +9,8 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
-libraries <- c("tidyverse", "data.table", "skimr", "nlme", "dynpred", "prodlim", 
-               "mice", "randomForestSRC", "pec", "ggsci")
+libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
+               "dynpred", "prodlim", "mice", "randomForestSRC", "pec")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -59,6 +59,7 @@ cv_vimp <- NULL
 cv_cif <- NULL
 cv_performance <- NULL
 
+# fold <- 1
 for (fold in 1:nrow(folds)){
     print(glue::glue("Current fold: {fold}"))
     
@@ -79,25 +80,35 @@ for (fold in 1:nrow(folds)){
     ## imputing covariates at relyear == 0   
     impute_dt <- long_train %>% 
         filter(relyear == 0)
+    
     temp_dt <- mice(impute_dt, m = 1, maxit = 50, method = "pmm", seed = seed)
     impute_dt <- complete(temp_dt)
 
     train_dt <- impute_dt %>% 
         bind_rows(long_train) %>% 
         arrange(id) %>% 
-        distinct(id, relyear, .keep_all = TRUE) %>% 
+        distinct(id, relyear, .keep_all = TRUE) %>%
+        group_by(id) %>%
         fill(!!longi_cov) %>% 
         left_join(select(train_dt, id:status_compete_num),
                   by = c("id", "relyear")) %>% 
-        arrange(id, relyear)
+        arrange(id, relyear) %>% 
+        ungroup()
+    
+    test_dt <- test_dt %>% 
+        group_by(id) %>% 
+        fill(!!longi_cov) %>% 
+        ungroup() 
     
     train_super_dt <- NULL
+    
     for (i in seq_along(landmark)) {
         temp <- cutLM(data = train_dt, outcome = list(time = "time_compete",
                                               status = "status_compete_num"),
                       LM = landmark[i], horizon = landmark[i] + predict_horizon,
                       covs = list(fixed = base_cov, varying = longi_cov),
-                      format = "long", id = "id", rtime = "relyear") 
+                      format = "long", id = "id", rtime = "relyear", 
+                      right = FALSE) 
         train_super_dt <- rbind(train_super_dt, temp)
     }
 
@@ -108,13 +119,14 @@ for (fold in 1:nrow(folds)){
                                               status = "status_compete_num"),
                       LM = landmark[i], horizon = landmark[i] + predict_horizon,
                       covs = list(fixed = base_cov, varying = longi_cov),
-                      format = "long", id = "id", rtime = "relyear") 
+                      format = "long", id = "id", rtime = "relyear", 
+                      right = FALSE) 
       test_super_dt <- rbind(test_super_dt, temp)
     }
     
     model_vimp <- NULL
 
-    model_cif <- NULL
+    # model_cif <- NULL
 
     model_performance <- NULL
 
@@ -144,22 +156,21 @@ for (fold in 1:nrow(folds)){
                             event = c("eskd", "death"))
     
         vimp_temp <- cbind(vimp_temp, 100*t(rsf_model$importance))
-    
         model_vimp <- rbind(model_vimp, vimp_temp)
     
-        column_cif <- sindex(jump.times = rsf_model$time.interest, 
-                    eval.times = (lmx + predict_horizon))
+        # column_cif <- sindex(jump.times = rsf_model$time.interest, 
+        #             eval.times = (lmx + predict_horizon))
     
         rsf_prediction <- predict.rfsrc(object = rsf_model,
                              newdata = test_lm, na.action = "na.omit")
     
-        cif_temp <- data.table(id = test_lm$id,
-                           LM = lmx,
-                           eskd_cif = rsf_prediction$cif[, column_cif, 1],
-                           death_cif = rsf_prediction$cif[, column_cif, 2])
-    
-        model_cif <- rbind(model_cif, cif_temp)
-    
+        # cif_temp <- data.table(id = test_lm$id,
+        #                    LM = lmx,
+        #                    eskd_cif = rsf_prediction$cif[, column_cif, 1],
+        #                    death_cif = rsf_prediction$cif[, column_cif, 2])
+        # 
+        # model_cif <- rbind(model_cif, cif_temp)
+        
         brier_eskd <- pec(rsf_model, formula = model_formula, data = test_lm,
                          cause = 1)
     
@@ -169,10 +180,11 @@ for (fold in 1:nrow(folds)){
         error_temp <- unname(apply(rsf_prediction$err.rate, 2, sum, na.rm = TRUE))
         
         performance_temp <- data.table(LM = lmx,
-                                   error_eskd = 100 * error_temp[1],
-                                   error_death = 100 * error_temp[2],
-                                   brier_eskd = crps(brier_eskd)[2],
-                                   brier_death = crps(brier_death)[2])
+                                       N = rsf_prediction$n,
+                                       error_eskd = 100 * error_temp[1],
+                                       error_death = 100 * error_temp[2],
+                                       brier_eskd = crps(brier_eskd)[2],
+                                       brier_death = crps(brier_death)[2])
     
         model_performance <- rbind(model_performance, performance_temp)
     }
@@ -180,8 +192,8 @@ for (fold in 1:nrow(folds)){
     model_vimp$fold <- fold
     cv_vimp <- rbind(cv_vimp, model_vimp)
     
-    model_cif$fold <- fold
-    cv_cif <- rbind(cv_cif, model_cif)
+    # model_cif$fold <- fold
+    # cv_cif <- rbind(cv_cif, model_cif)
     
     model_performance$fold <- fold
     cv_performance <- rbind(cv_performance, model_performance)
@@ -199,9 +211,12 @@ cv_performance %>%
                           labels = c("ESKD", "Death"))) %>%  
     ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
     facet_grid(~ LM) + scale_fill_nejm() + 
-    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark Prediction Horizon 2 years exclude Urea and Initial eGFR", y = "Error Rate (%)") + 
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 2 years", 
+         y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank())
+                       legend.title = element_blank()) + 
+    scale_y_continuous(breaks = seq(0, 25, 5), limits = c(2,25)) #universal setting
+
 
 cv_performance %>% 
     select(-(error_eskd:error_death), -fold) %>% 
@@ -213,10 +228,12 @@ cv_performance %>%
                           labels = c("ESKD", "Death"))) %>%    
     ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
     facet_grid(~ LM) + scale_fill_nejm() + 
-    labs(title = "Integrated Brier Score per Landmark Prediction Horizon 2 years exclude Urea and Initial eGFR", 
+    labs(title = "Integrated Brier Score per Landmark with LOCF Prediction Horizon 2 years",
          y = "Brier Score") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank())
+                       legend.title = element_blank()) +
+    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
 
 cv_vimp %>% 
     filter(event == "eskd") %>% 
@@ -229,10 +246,11 @@ cv_vimp %>%
     geom_boxplot() + 
     coord_flip() + 
     facet_grid(~ LM) + 
-    labs(title = "Variable Importance for 2 years ESKD Prediction per Landmark exclude Urea and Initial eGFR",
+    labs(title = "Variable Importance LOCF for 2 years ESKD Prediction per Landmark",
          y = "Value") +  
     theme_bw() + theme(axis.title.y = element_blank(), 
-                       legend.position = "none")
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
 
 cv_vimp %>% 
     filter(event == "death") %>% 
@@ -245,10 +263,11 @@ cv_vimp %>%
     geom_boxplot() + 
     coord_flip() + 
     facet_grid(~ LM) + 
-    labs(title = "Variable Importance for 2 years Death Prediction per Landmark exclude Urea and Initial eGFR",
+    labs(title = "Variable Importance LOCF for 2 years Death Prediction per Landmark",
          y = "Value") +  
     theme_bw() + theme(axis.title.y = element_blank(), 
-                       legend.position = "none")
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
 
 ```
 
