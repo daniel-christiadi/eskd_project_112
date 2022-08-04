@@ -1,0 +1,112 @@
+﻿4540	Laverty Pathology	2016-08-26 00:00:00.000	CMV IgG	DETECTED	DETECTED
+4540	Laverty Pathology	2016-08-26 00:00:00.000	CMV IgM	Not Detected	Not Detected
+4703	Laverty Pathology	2021-11-19 12:52:00.000	CMV IgG	Not Detected	Not Detected
+4703	Laverty Pathology	2021-11-19 12:52:00.000	CMV IgM	Not Detected	Not Detected
+4703	Laverty Pathology	2022-01-17 10:11:00.000	CMV IgG	Not Detected	Not Detected
+4703	Laverty Pathology	2022-01-17 10:11:00.000	CMV IgM	Not Detected	Not Detected
+15652	Laverty Pathology	2019-09-13 11:11:00.000	CMV IgG	DETECTED	DETECTED
+15652	Laverty Pathology	2019-09-13 11:11:00.000	CMV IgM	Not Detected	Not Detected
+17810	Laverty Pathology	2017-01-30 09:05:00.000	CMV IgG	DETECTED	DETECTED
+17810	Laverty Pathology	2017-01-30 09:05:00.000	CMV IgM	Not Detected	Not Detected
+19671	Laverty Pathology	2019-02-26 00:00:00.000	CMV IgG	DETECTED	DETECTED
+19671	Laverty Pathology	2019-02-26 00:00:00.000	CMV IgG	DETECTED	DETECTED
+19671	Laverty Pathology	2019-02-26 00:00:00.000	CMV IgM	Not Detected	Not Detected
+19671	Laverty Pathology	2019-02-26 00:00:00.000	CMV IgM	Not Detected	Not Detected
+19671	Laverty Pathology	2020-08-14 00:00:00.000	CMV IgG	DETECTED	DETECTED
+19671	Laverty Pathology	2020-08-14 00:00:00.000	CMV IgM	Not Detected	Not Detected
+20802	Laverty Pathology	2020-04-22 10:52:00.000	CMV IgG	DETECTED	DETECTED
+20802	Laverty Pathology	2020-04-22 10:52:00.000	CMV IgM	Not Detected	Not Detected
+21030	Laverty Pathology	2019-03-12 13:12:00.000	CMV IgG	Not Detected	Not Detected
+21030	Laverty Pathology	2019-03-12 13:12:00.000	CMV IgM	Not Detected	Not Detected
+21486	Laverty Pathology	2015-08-25 09:00:00.000	CMV IgG	DETECTED	DETECTED
+21486	Laverty Pathology	2015-08-25 09:00:00.000	CMV IgM	Not Detected	Not Detected
+22690	Laverty Pathology	2020-10-21 09:09:00.000	CMV IgG	DETECTED	DETECTED
+22690	Laverty Pathology	2020-10-21 09:09:00.000	CMV IgM	Not Detected	Not Detected
+23522	Laverty Pathology	2015-04-24 00:00:00.000	CMV IgG	Not Detected	Not Detected
+23522	Laverty Pathology	2015-04-24 00:00:00.000	CMV IgM	Not Detected	Not Detected
+4744	Laverty Pathology	2015-01-15 09:20:00.000	CMV IgG	DETECTED	DETECTED
+4744	Laverty Pathology	2015-01-15 09:20:00.000	CMV IgM	Not Detected	Not Detected
+4744	Laverty Pathology	2017-03-23 10:06:00.000	CMV IgG	DETECTED	DETECTED
+4744	Laverty Pathology	2017-03-23 10:06:00.000	CMV IgG	DETECTED	DETECTED
+4744	Laverty Pathology	2017-03-23 10:06:00.000	CMV IgM	Not Detected	Not Detected
+4744	Laverty Pathology	2017-03-23 10:06:00.000	CMV IgM	Not Detected	Not Detected
+18003	Laverty Pathology	2020-03-19 08:30:00.000	CMV IgG	DETECTED	DETECTED
+18003	Laverty Pathology	2020-03-19 08:30:00.000	CMV IgM	Not Detected	Not Detected
+19253	Laverty Pathology	2020-02-13 10:14:00.000	CMV IgG	Not Detected	Not Detected
+19253	Laverty Pathology	2020-02-13 10:14:00.000	CMV IgG	Not Detected	Not Detected
+19253	Laverty Pathology	2020-02-13 10:14:00.000	CMV IgM	Not Detected	Not Detected
+19253	Laverty Pathology	2020-02-13 10:14:00.000	CMV IgM	Not Detected	Not Detected
+22936	Laverty Pathology	2022-04-23 11:16:00.000	CMV IgG	DETECTED	DETECTED
+22936	Laverty Pathology	2022-04-23 11:16:00.000	CMV IgM	Not Detected	Not Detected
+24188	Laverty Pathology	2012-07-13 09:15:00.000	CMV IgG	Not Detected	Not Detected
+24188	Laverty Pathology	2012-07-13 09:15:00.000	CMV IgM	Not Detected	Not Detected
+8350	Laverty Pathology	2016-06-10 12:10:00.000	CMV IgG	DETECTED	DETECTED
+8350	Laverty Pathology	2016-06-10 12:10:00.000	CMV IgM	Not Detected	Not Detected
+11373	Laverty Pathology	2017-04-24 13:00:00.000	CMV IgG	DETECTED	DETECTED
+11373	Laverty Pathology	2017-04-24 13:00:00.000	CMV IgM	Not Detected	Not Detected
+12806	Laverty Pathology	2016-08-04 08:15:00.000	CMV IgG	DETECTED	DETECTED
+12806	Laverty Pathology	2016-08-04 08:15:00.000	CMV IgM	Not Detected	Not Detected
+21817	Laverty Pathology	2020-10-12 08:44:00.000	CMV IgM	Not Detected	Not Detected
+21817	Laverty Pathology	2020-10-12 08:44:00.000	CMV IgG	DETECTED	DETECTED
+22669	Laverty Pathology	2018-08-13 08:37:00.000	CMV IgG	DETECTED	DETECTED
+22669	Laverty Pathology	2018-08-13 08:37:00.000	CMV IgM	Not Detected	Not Detected
+22669	Laverty Pathology	2020-03-19 08:46:00.000	CMV IgG	DETECTED	DETECTED
+22669	Laverty Pathology	2020-03-19 08:46:00.000	CMV IgM	Not Detected	Not Detected
+9104	Laverty Pathology	2009-11-13 10:25:00.000	CMV IgG	DETECTED	DETECTED
+9104	Laverty Pathology	2009-11-13 10:25:00.000	CMV IgM	Not Detected	Not Detected
+22930	Laverty Pathology	2020-08-18 11:22:00.000	CMV IgG	Not Detected	Not Detected
+22930	Laverty Pathology	2020-08-18 11:22:00.000	CMV IgM	Not Detected	Not Detected
+24956	Laverty Pathology	2021-03-25 13:01:00.000	CMV IgG	Not Detected	Not Detected
+24956	Laverty Pathology	2021-03-25 13:01:00.000	CMV IgM	Not Detected	Not Detected
+21093	Laverty Pathology	2019-02-25 10:50:00.000	CMV IgG	Not Detected	Not Detected
+21093	Laverty Pathology	2019-02-25 10:50:00.000	CMV IgM	Not Detected	Not Detected
+22124	Laverty Pathology	2013-07-23 13:10:00.000	CMV IgG	DETECTED	DETECTED
+22124	Laverty Pathology	2013-07-23 13:10:00.000	CMV IgM	Not Detected	Not Detected
+9159	Laverty Pathology	2012-10-08 13:10:00.000	CMV IgG	Not Detected	Not Detected
+9159	Laverty Pathology	2012-10-08 13:10:00.000	CMV IgM	Not Detected	Not Detected
+9159	Laverty Pathology	2013-10-11 14:30:00.000	CMV IgG	Not Detected	Not Detected
+9159	Laverty Pathology	2013-10-11 14:30:00.000	CMV IgM	Not Detected	Not Detected
+12003	Laverty Pathology	2018-05-11 08:53:00.000	CMV IgG	Not Detected	Not Detected
+12003	Laverty Pathology	2018-05-11 08:53:00.000	CMV IgM	Not Detected	Not Detected
+12003	Laverty Pathology	2019-06-19 09:54:00.000	CMV IgG	Not Detected	Not Detected
+12003	Laverty Pathology	2019-06-19 09:54:00.000	CMV IgM	Not Detected	Not Detected
+22813	Laverty Pathology	2020-08-18 00:00:00.000	CMV IgG	Not Detected	Not Detected
+22813	Laverty Pathology	2020-08-18 00:00:00.000	CMV IgM	Not Detected	Not Detected
+22813	Laverty Pathology	2021-11-01 00:00:00.000	CMV IgG	Not Detected	Not Detected
+22813	Laverty Pathology	2021-11-01 00:00:00.000	CMV IgM	Not Detected	Not Detected
+22813	Laverty Pathology	2022-02-21 00:00:00.000	CMV IgG	Not Detected	Not Detected
+22813	Laverty Pathology	2022-02-21 00:00:00.000	CMV IgM	Not Detected	Not Detected
+25355	Laverty Pathology	2022-03-15 08:34:00.000	CMV IgG	DETECTED	DETECTED
+25355	Laverty Pathology	2022-03-15 08:34:00.000	CMV IgM	Not Detected	Not Detected
+7165	Laverty Pathology	2019-04-08 09:50:00.000	CMV IgG	DETECTED	DETECTED
+7165	Laverty Pathology	2019-04-08 09:50:00.000	CMV IgG	DETECTED	DETECTED
+7165	Laverty Pathology	2019-04-08 09:50:00.000	CMV IgM	DETECTED	DETECTED
+7165	Laverty Pathology	2019-04-08 09:50:00.000	CMV IgM	DETECTED	DETECTED
+7165	Laverty Pathology	2019-05-24 00:00:00.000	CMV IgG	DETECTED	DETECTED
+7165	Laverty Pathology	2019-05-24 00:00:00.000	CMV IgG	DETECTED	DETECTED
+7165	Laverty Pathology	2019-05-24 00:00:00.000	CMV IgM	DETECTED	DETECTED
+7165	Laverty Pathology	2019-05-24 00:00:00.000	CMV IgM	DETECTED	DETECTED
+8549	Laverty Pathology	2021-05-28 08:39:00.000	CMV IgG	DETECTED	DETECTED
+8549	Laverty Pathology	2021-05-28 08:39:00.000	CMV IgM	Not Detected	Not Detected
+14779	Laverty Pathology	2013-11-21 09:45:00.000	CMV IgG	DETECTED	DETECTED
+14779	Laverty Pathology	2013-11-21 09:45:00.000	CMV IgM	Not Detected	Not Detected
+17732	Laverty Pathology	2016-03-23 00:00:00.000	CMV IgG	DETECTED	DETECTED
+17732	Laverty Pathology	2016-03-23 00:00:00.000	CMV IgM	Not Detected	Not Detected
+19101	Laverty Pathology	2013-06-21 11:20:00.000	CMV IgG	DETECTED	DETECTED
+19101	Laverty Pathology	2013-06-21 11:20:00.000	CMV IgM	Not Detected	Not Detected
+19101	Laverty Pathology	2015-11-23 11:30:00.000	CMV IgG	DETECTED	DETECTED
+19101	Laverty Pathology	2015-11-23 11:30:00.000	CMV IgM	Not Detected	Not Detected
+19370	Laverty Pathology	2009-07-06 09:20:00.000	CMV IgG	DETECTED	DETECTED
+19370	Laverty Pathology	2009-07-06 09:20:00.000	CMV IgM	Not Detected	Not Detected
+21758	Laverty Pathology	2019-04-30 16:15:00.000	CMV IgG	Not Detected	Not Detected
+21758	Laverty Pathology	2019-04-30 16:15:00.000	CMV IgM	Not Detected	Not Detected
+22637	Laverty Pathology	2004-09-08 08:15:00.000	CMV IgG	Detected	Detected
+22637	Laverty Pathology	2004-09-08 08:15:00.000	CMV IgM	Not Detected	Not Detected
+23404	Laverty Pathology	2020-12-15 00:00:00.000	CMV IgG	DETECTED	DETECTED
+23404	Laverty Pathology	2020-12-15 00:00:00.000	CMV IgG	DETECTED	DETECTED
+23404	Laverty Pathology	2020-12-15 00:00:00.000	CMV IgM	Not Detected	Not Detected
+23404	Laverty Pathology	2020-12-15 00:00:00.000	CMV IgM	Not Detected	Not Detected
+8979	Laverty Pathology	2016-12-14 10:10:00.000	CMV IgG	Not Detected	Not Detected
+8979	Laverty Pathology	2016-12-14 10:10:00.000	CMV IgM	Not Detected	Not Detected
+10558	Laverty Pathology	2021-11-09 08:50:00.000	CMV IgG	DETECTED	DETECTED
+10558	Laverty Pathology	2021-11-09 08:50:00.000	CMV IgM	Not Detected	Not Detected

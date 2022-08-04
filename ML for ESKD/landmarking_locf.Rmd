@@ -10,7 +10,8 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
-               "dynpred", "prodlim", "mice", "randomForestSRC", "pec")
+               "dynpred", "prodlim", "mice", "randomForestSRC", "pec", 
+               "gtsummary")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -19,14 +20,23 @@ lib.ok <- sapply(libraries, require, character.only=TRUE)
 
 cross_val <- 5
 seed <- 7
-predict_horizon <- 2 #5
+predict_horizon <- 5 #5
 landmark <- c(0.5, 1, 1.5, 2, 2.5, 3)
 
-longi_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride", 
-                "egfr", "glucose", "haemoglobin", "phosphate", "platelet", 
-                "potassium", "sodium", "wcc") #"urea"
+# full model # r/o: "urea", "creatinine"
+# longi_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride",
+#                 "egfr", "glucose", "haemoglobin", "phosphate", "platelet",
+#                 "potassium", "sodium", "wcc") 
 
-base_cov <- c("sex", "age_init", "gn_cat") #"value_egfr_init", 
+# longi_cov <- c("albumin", "alkphos", "chloride", "egfr", "haemoglobin", "phosphate",
+#                 "potassium", "sodium", "wcc") # Top 10
+
+# longi_cov <- c("albumin", "chloride", "egfr", "haemoglobin", "sodium") # Top 6
+longi_cov <- c("albumin", "chloride", "egfr", "haemoglobin") # Top 5
+
+# full model # r/o: "value_egfr_init"
+# base_cov <- c("sex", "age_init", "gn_cat")  
+base_cov <- c("age_init") # reduced model
 ```
 
 ```{r k-fold}
@@ -51,16 +61,14 @@ set.seed(seed)
 folds <- dt %>% 
     select(id, value_egfr_init:status_compete) %>% 
     distinct(id, .keep_all = TRUE) %>% 
-    rsample::vfold_cv(v = cross_val, strata = "status_compete")
+    rsample::vfold_cv(v = cross_val, strata = "status_compete", )
 ```
 
-```{r cross validation LOCF}
+```{r cross validation}
 cv_vimp <- NULL
-cv_cif <- NULL
 cv_performance <- NULL
 
-# fold <- 1
-for (fold in 1:nrow(folds)){
+for (fold in 1:cross_val){
     print(glue::glue("Current fold: {fold}"))
     
     train_id <- folds$splits[[fold]] %>% 
@@ -90,15 +98,17 @@ for (fold in 1:nrow(folds)){
         distinct(id, relyear, .keep_all = TRUE) %>%
         group_by(id) %>%
         fill(!!longi_cov) %>% 
+        ungroup() %>% 
         left_join(select(train_dt, id:status_compete_num),
                   by = c("id", "relyear")) %>% 
         arrange(id, relyear) %>% 
-        ungroup()
+        as.data.table()
     
     test_dt <- test_dt %>% 
         group_by(id) %>% 
         fill(!!longi_cov) %>% 
-        ungroup() 
+        ungroup() %>% 
+        as.data.table()
     
     train_super_dt <- NULL
     
@@ -125,11 +135,8 @@ for (fold in 1:nrow(folds)){
     }
     
     model_vimp <- NULL
-
-    # model_cif <- NULL
-
     model_performance <- NULL
-
+    
     for (lmx in landmark){
         print(glue::glue("Processing landmark: {lmx}"))
     
@@ -144,9 +151,8 @@ for (fold in 1:nrow(folds)){
                        str_c(c(base_cov, longi_cov), collapse = " + "), 
                        sep = "~"))
     
-        tune_rsf <- tune.rfsrc(model_formula, data = train_lm, mtryStart = 1, 
-               ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)),
-               sampsize = 0.623 * (nrow(train_lm)), stepFactor = 1.5)
+        tune_rsf <- tune.rfsrc(model_formula, data = train_lm, 
+               ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)))
     
         rsf_model <- rfsrc(formula = model_formula, data = train_lm, ntree = 1000, 
               splitrule = "logrankCR", importance = TRUE, statistics = TRUE, 
@@ -158,26 +164,16 @@ for (fold in 1:nrow(folds)){
         vimp_temp <- cbind(vimp_temp, 100*t(rsf_model$importance))
         model_vimp <- rbind(model_vimp, vimp_temp)
     
-        # column_cif <- sindex(jump.times = rsf_model$time.interest, 
-        #             eval.times = (lmx + predict_horizon))
-    
         rsf_prediction <- predict.rfsrc(object = rsf_model,
                              newdata = test_lm, na.action = "na.omit")
     
-        # cif_temp <- data.table(id = test_lm$id,
-        #                    LM = lmx,
-        #                    eskd_cif = rsf_prediction$cif[, column_cif, 1],
-        #                    death_cif = rsf_prediction$cif[, column_cif, 2])
-        # 
-        # model_cif <- rbind(model_cif, cif_temp)
-        
         brier_eskd <- pec(rsf_model, formula = model_formula, data = test_lm,
                          cause = 1)
     
         brier_death <- pec(rsf_model, formula = model_formula, data = test_lm,
                          cause = 2)
     
-        error_temp <- unname(apply(rsf_prediction$err.rate, 2, sum, na.rm = TRUE))
+        error_temp <- unname(apply(rsf_prediction$err.rate, 2, mean, na.rm = TRUE))
         
         performance_temp <- data.table(LM = lmx,
                                        N = rsf_prediction$n,
@@ -192,82 +188,163 @@ for (fold in 1:nrow(folds)){
     model_vimp$fold <- fold
     cv_vimp <- rbind(cv_vimp, model_vimp)
     
-    # model_cif$fold <- fold
-    # cv_cif <- rbind(cv_cif, model_cif)
-    
     model_performance$fold <- fold
     cv_performance <- rbind(cv_performance, model_performance)
 }
+
+# vimp_name <- str_c(c("cv_locf_vimp", predict_horizon), collapse = "_")
+# vimp_file_name <- str_c(c(vimp_name, ".gz"), collapse = "")
+# fwrite(cv_vimp, file = vimp_file_name)
+
+# performance_name <- str_c(c("cv_locf_performance", predict_horizon), 
+#                           collapse = "_")
+# performance_name <- str_c(c("cv_locf_performance_top10", predict_horizon), 
+#                           collapse = "_")
+# performance_name <- str_c(c("cv_locf_performance_top6", predict_horizon),
+#                           collapse = "_")
+performance_name <- str_c(c("cv_locf_performance_top5", predict_horizon),
+                          collapse = "_")
+performance_file_name <- str_c(c(performance_name, ".gz"), collapse = "")
+fwrite(cv_performance, file = performance_file_name)
 ```
 
-```{r cv-results}
-cv_performance %>% 
-    select(-(brier_eskd:fold)) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
-    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>%  
-    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() + 
-    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 2 years", 
-         y = "Error Rate (%)") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) + 
-    scale_y_continuous(breaks = seq(0, 25, 5), limits = c(2,25)) #universal setting
+```{r EDA}
+filled_dt <- dt %>% 
+    group_by(id) %>% 
+    fill(all_of(longi_cov)) %>% 
+    ungroup()
 
+filled_dt <- filled_dt %>% 
+    select(id, relyear, sex:status_compete_num, !!longi_cov) %>% 
+    as.data.table()
 
-cv_performance %>% 
-    select(-(error_eskd:error_death), -fold) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("brier_eskd", "brier_death"),
-                 names_to = "brier") %>% 
-    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
-                          labels = c("ESKD", "Death"))) %>%    
-    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() + 
-    labs(title = "Integrated Brier Score per Landmark with LOCF Prediction Horizon 2 years",
-         y = "Brier Score") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) +
-    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+super_filled5_dt <- NULL
 
+for (i in seq_along(landmark)) {
+        temp <- cutLM(data = filled_dt, outcome = list(time = "time_compete",
+                                              status = "status_compete_num"),
+                      LM = landmark[i], horizon = landmark[i] + predict_horizon,
+                      covs = list(fixed = base_cov, varying = longi_cov),
+                      format = "long", id = "id", rtime = "relyear", 
+                      right = FALSE) 
+      super_filled5_dt <- rbind(super_filled5_dt, temp)
+}
 
-cv_vimp %>% 
-    filter(event == "eskd") %>% 
-    select(-event, -fold) %>% 
-    arrange(LM) %>% 
-    mutate(LM = factor(LM)) %>% 
-    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
-    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
-               fill = covariates)) + 
-    geom_boxplot() + 
-    coord_flip() + 
-    facet_grid(~ LM) + 
-    labs(title = "Variable Importance LOCF for 2 years ESKD Prediction per Landmark",
-         y = "Value") +  
-    theme_bw() + theme(axis.title.y = element_blank(), 
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+super_filled5_dt <- super_filled5_dt %>% 
+    mutate(status_compete = case_when(
+        status_compete_num == 0 ~ "censored",
+        status_compete_num == 1 ~ "eskd",
+        TRUE ~ "death"
+    )) %>% 
+    mutate(status_compete = factor(status_compete, 
+                                   levels = c("censored", "eskd", "death"),
+                                   labels = c("Censored", "ESKD", "Death")))
 
-cv_vimp %>% 
-    filter(event == "death") %>% 
-    select(-event, -fold) %>% 
-    arrange(LM) %>% 
-    mutate(LM = factor(LM)) %>% 
-    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
-    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
-               fill = covariates)) + 
-    geom_boxplot() + 
-    coord_flip() + 
-    facet_grid(~ LM) + 
-    labs(title = "Variable Importance LOCF for 2 years Death Prediction per Landmark",
-         y = "Value") +  
-    theme_bw() + theme(axis.title.y = element_blank(), 
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+theme_gtsummary_journal(journal = "nejm")
 
+for (lmx in landmark){
+    
+    file_name <- str_c(c("landmark"), lmx, c(".html"), sep = "_")
+    print(file_name)
+    
+    super_filled5_dt %>%
+        filter(LM == !!lmx) %>%
+        select(-(id:sex), -gn_cat, -(relyear:LM)) %>%
+        tbl_summary(
+            by = "status_compete",
+            missing = "no",
+            label = list(age_init ~ "Initial age at presentation")
+        ) %>% as_gt() %>% 
+        gt::gtsave(file_name)
+        
+}
+```
+
+```{r final model}
+predict_horizon <- 2 #5
+landmark <- c(0.5, 1, 1.5, 2, 2.5, 3)
+longi_cov <- c("egfr", "haemoglobin", "albumin", "chloride", "glucose")
+base_cov <- c("age_init")
+
+fold <- 2
+
+train_id <- folds$splits[[fold]] %>% 
+        rsample::analysis() %>% 
+        pull(id)
+    
+test_id <- folds$splits[[fold]] %>% 
+        rsample::assessment() %>% 
+        pull(id)
+    
+train_dt <- dt[id %chin% train_id,]
+test_dt <- dt[id %chin% test_id,]
+
+long_train <- train_dt %>% 
+    select(id, relyear, !!longi_cov)
+
+impute_dt <- long_train %>% 
+    filter(relyear == 0)
+
+temp_dt <- mice(impute_dt, m = 1, maxit = 50, method = "pmm", seed = seed)
+impute_dt <- complete(temp_dt)
+
+train_dt <- impute_dt %>% 
+    bind_rows(long_train) %>% 
+    arrange(id) %>% 
+    distinct(id, relyear, .keep_all = TRUE) %>% 
+    group_by(id) %>% 
+    fill(!!longi_cov) %>% 
+    ungroup() %>% 
+    left_join(select(train_dt, id:status_compete_num),
+              by = c("id", "relyear")) %>% 
+    arrange(id, relyear) %>% 
+    as.data.table() 
+    
+train_super_dt <- NULL
+    
+for (i in seq_along(landmark)) {
+    temp <- cutLM(data = train_dt, outcome = list(time = "time_compete",
+                                          status = "status_compete_num"),
+                  LM = landmark[i], horizon = landmark[i] + predict_horizon,
+                  covs = list(fixed = base_cov, varying = longi_cov),
+                  format = "long", id = "id", rtime = "relyear", 
+                  right = FALSE) 
+    train_super_dt <- rbind(train_super_dt, temp)
+}
+
+test_dt <- test_dt %>%
+    group_by(id) %>%
+    fill(!!longi_cov) %>%
+    ungroup() %>% as.data.table()
+
+# saveRDS(test_dt, "test_dt.gz")
+
+set.seed(seed = seed)
+for (lmx in landmark){
+    print(glue::glue("Processing landmark: {lmx}"))
+
+    temp_dt <- train_super_dt %>% 
+        filter(LM == lmx)
+
+    model_formula <- as.formula(str_c("Surv(time_compete, status_compete_num)",
+                   str_c(c(base_cov, longi_cov), collapse = " + "), 
+                   sep = "~"))
+
+    tune_rsf <- tune.rfsrc(model_formula, data = temp_dt, 
+                           ntreeTry = 500, 
+                           nodesizeTry = c(1:9, seq(10, 100, 5)))
+    
+    print(tune_rsf$optimal)
+
+    rsf_model <- rfsrc(formula = model_formula, data = temp_dt, ntree = 1000, 
+          mtry = tune_rsf$optimal[[2]], nodesize = tune_rsf$optimal[[1]], 
+          seed = seed)
+    
+    model_name <- str_c(c("model", lmx, "landmark", predict_horizon), 
+                        collapse = "_")
+    
+    file_name <- str_c(c(model_name, ".gz"), collapse = "")
+    saveRDS(rsf_model, file = file_name)
+}
 ```
 

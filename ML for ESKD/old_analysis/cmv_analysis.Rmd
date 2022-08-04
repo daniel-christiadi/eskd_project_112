@@ -1,0 +1,144 @@
+---
+title: "cmv_analysis"
+author: "Daniel Christiadi"
+date: "Compiled on `r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
+libraries <- c("tidyverse", 'data.table', 'skimr', "gtsummary", "JMbayes2")
+installed <- installed.packages()[,'Package']
+new.libs <- libraries[!(libraries %in% installed)]
+if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
+                                      dependencies=TRUE)
+lib.ok <- sapply(libraries, require, character.only=TRUE)
+```
+
+```{r create cmv dataset, include=FALSE}
+act_cmv <- fread("act_cmv.txt")
+
+act_cmv <- act_cmv %>% 
+    separate(test, into = c("test", "type", "value"))
+
+act_cmv[is.na(value), value := result]
+
+act_cmv[id == 25323, value := "Not"]
+
+act_cmv <- act_cmv %>% 
+    select(-(path1:path4), -result) %>% 
+    unite(col = "test", test:type) %>% 
+    mutate(result = if_else(value == "DETECTED", "pos", "neg"))
+
+act_cmv <- act_cmv %>% 
+    select(-value)
+
+act_cmv <- act_cmv %>% 
+    distinct(id, .keep_all = TRUE) 
+
+act_cmv <- act_cmv %>% 
+    select(-test)
+
+cap_cmv <- fread("capital cmv.txt")
+
+cap_cmv <- cap_cmv %>% 
+    rename(id = V1, date = V2, test = V3, result = V4, num_result = V5)
+
+cap_cmv <- cap_cmv %>% 
+    mutate(result = replace(result, num_result != "NULL", "Positive")) %>% 
+    filter(result != "Equivocal", result != "") %>% 
+    mutate(new_result = case_when(
+        result == "<15" ~ "neg",
+        result == "<6" ~ "neg",
+        result == ">250" ~ "pos",
+        result == "Negative" ~ "neg",
+        TRUE ~ "pos"
+    )) %>% 
+    select(-(result:num_result)) %>% 
+    rename(result = new_result)
+
+cap_cmv <- cap_cmv %>% 
+    select(-test)
+
+lav_cmv <- fread("laverty cmv.txt")
+
+lav_cmv <- lav_cmv %>% 
+    rename(id = V1, date = V3, test = V4, result1 = V5, result2 = V6) %>% 
+    select(-V2) %>% 
+    filter(test == "CMV IgG") %>% 
+    mutate(result = if_else(result1 == "Not Detected", "neg", "pos")) %>% 
+    select(id, date, test, result)
+
+lav_cmv <- lav_cmv %>% 
+    distinct(id, .keep_all = TRUE)
+
+lav_cmv <- lav_cmv %>% 
+    select(-test)
+
+cmv <- rbindlist(list(act_cmv, cap_cmv, lav_cmv))
+
+cmv <- cmv %>% 
+    arrange(id, date) %>% 
+    distinct(id, .keep_all = TRUE)
+
+```
+
+```{r, include=FALSE}
+meta_dt <- read_rds("meta.RDS")
+
+meta_dt <- meta_dt %>% 
+    left_join(y = select(cmv, id, result), by = "id") %>% 
+    rename(cmv_status = result)
+
+meta_dt <- meta_dt %>% 
+    filter(!is.na(cmv_status)) %>% 
+    relocate(cmv_status, .after = gn_cat)
+    
+
+```
+
+```{r}
+short_dt <- meta_dt %>% 
+    select(id, value_egfr_init:status_compete) %>% 
+    distinct(id, .keep_all = TRUE) 
+
+short_dt <- short_dt %>% 
+    mutate(sex = factor(sex, levels = c("Female", "Male")),
+           gn_cat = factor(gn_cat, levels = c("no", "yes")),
+           cmv_status = factor(cmv_status, levels = c("neg", "pos")),
+           status_compete = factor(status_compete, levels = c("censored", "eskd",
+                                                              "death")))
+
+short_dt %>% 
+    select(value_egfr_init, sex, age_init, gn_cat, cmv_status, status_compete) %>% 
+    tbl_summary(by = cmv_status,
+                label = list(value_egfr_init ~ "Initial eGFR",
+                             sex ~ "Sex", age_init ~ "Age at Presentation",
+                             gn_cat ~ "Positive GN Diagnosis", 
+                             status_compete ~ "Outcome"
+                             )) %>% 
+    add_p() %>% 
+    modify_header(label ~ "**Variable**") %>% 
+    modify_caption("**Baseline Characteristics based on CMV Status**")
+
+```
+Due to the limited number, I decided to use cox-proportional hazard analysis with death as competing risk. The hazard ratio for the competing risk could be found on the lower half of table 
+```{r}
+compete_short_dt <- crisk_setup(short_dt, statusVar = "status_compete",
+                                censLevel = "censored",
+                                nameStrata = "CR")
+
+model <- coxph(Surv(time_compete, status2) ~ (value_egfr_init + sex + age_init + 
+                   gn_cat + cmv_status) * strata(CR), data = compete_short_dt)
+
+tbl_regression(model, 
+               exponentiate = TRUE,
+               label = list(value_egfr_init ~ "Initial eGFR",
+                            sex ~ "Sex", age_init ~ "Age at Presentation",
+                            gn_cat ~ "GN Diagnosis",
+                            cmv_status ~ "CMV Status")) %>% 
+    modify_header(label ~ "**Variable**") %>% 
+    modify_caption("**Competing Cox Proportional Analysis**")
+```

@@ -9,8 +9,9 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
+
 libraries <- c("tidyverse", "data.table", "skimr", "rsample", "nlme", 
-               "dynpred", "prodlim", "randomForestSRC", "pec", "ggsci")
+               "dynpred", "prodlim", "randomForestSRC", "pec")
 
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
@@ -22,12 +23,12 @@ lib.ok <- sapply(libraries, require, character.only=TRUE)
 source("utility_functions.R")
 cross_val <- 5
 seed <- 7
-predict_horizon <- 2 #5
+predict_horizon <- 5 #5
 landmark <- c(0.5, 1, 1.5, 2, 2.5, 3)
 
 longitudinal_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride", 
                 "egfr", "glucose", "haemoglobin", "phosphate", "platelet", 
-                "potassium", "sodium", "wcc") #"urea"
+                "potassium", "sodium", "wcc") #"urea", "creatinine"
 
 baseline_cov <- c("sex", "age_init", "gn_cat") #"value_egfr_init", 
 ```
@@ -57,268 +58,9 @@ folds <- dt %>%
     rsample::vfold_cv(v = cross_val, strata = "status_compete")
 ```
 
-```{r adjusting lme model}
-
-for (fold in 1:cross_val){
-    train_id <- folds$splits[[fold]] %>% 
-            rsample::analysis() %>% 
-            pull(id)
-    
-    train_dt <- dt[id %chin% train_id]
-    model_list <- vector(mode = "list", length = length(longitudinal_cov))
-    
-    
-    for (index in seq_along(longitudinal_cov)){
-        model <- create_lme_model_ns(longitudinal_cov[index], baseline_cov,
-                                          dataset = train_dt)
-        model_list[[index]] <- model
-    }
-}
-```
-
-```{r train dataset}
-## start the fold loop here
-train_id <- folds$splits[[1]] %>% 
-        rsample::analysis() %>% 
-        pull(id)
-
-train_dt <- dt[id %chin% train_id]
-model_list <- vector(mode = "list", length = length(longitudinal_cov))
-
-# for (index in seq_along(longitudinal_cov)){
-#     model_formula <- create_lme_formula(longitudinal_cov[index], 
-#                                         baseline_covariates = baseline_cov)
-#     model_list[[index]] <- create_lme_model(model_formula, train_dt)
-# }
-
-# testing more complex linear mixed model
-for (index in seq_along(longitudinal_cov)){
-    model <- create_lme_model_ns(longitudinal_cov[index], baseline_cov,
-                                      dataset = train_dt)
-    model_list[[index]] <- model
-}
-
-names(model_list) <- longitudinal_cov
-train_super_dt <- NULL
-
-for (lmx in landmark){
-    print(glue::glue("Processing landmark: {lmx}"))
-    
-    temp_dt <- train_dt %>% 
-        distinct(id, .keep_all = TRUE) %>% 
-        select(id, !!baseline_cov, time_compete:status_compete_num) %>% 
-        mutate(relyear = lmx)
-    
-    for (model_index in seq_along(model_list)){
-        response_name <- names(model_list)[[model_index]]
-        b <- ranef(model_list[[model_index]])
-        sigma <- model_list[[model_index]]$sigma
-        betas <- fixef(model_list[[model_index]])
-        dataset <- model_list[[model_index]]$data
-        terms_X <- as.formula(str_c(c("~relyear", "I(relyear^2)", baseline_cov), 
-                                    collapse = "+"))
-        # terms_X <- as.formula(str_c(c("~relyear", baseline_cov), collapse = "+"))
-        terms_Z <- formula(model_list[[model_index]]$modelStruct$reStruct[[1]])
-        all_vars <- unique(c(all.vars(terms_X), all.vars(terms_Z)))
-        
-        dataset <- dataset %>%
-            distinct(id, .keep_all = TRUE) %>% 
-            select(id, !!all_vars) %>% 
-            mutate(relyear = lmx)
-        
-        X_matrix <- model.matrix(terms_X, data = dataset)
-        Z_matrix <- model.matrix(terms_Z, data = dataset)
-        level <- as.vector(c(X_matrix %*% betas) + rowSums(Z_matrix * b))
-        
-        temp_dt[[response_name]] <- level
-    }
-    cut_temp_dt <- cutLM(data = temp_dt, outcome = list(time = "time_compete",
-                                                  status = "status_compete_num"),
-                          LM = lmx, 
-                          horizon = lmx + predict_horizon,
-                          covs = list(fixed = baseline_cov, 
-                                      varying = longitudinal_cov),
-                          format = "long", id = "id", rtime = "relyear", right = FALSE)
-    
-    train_super_dt <- rbind(train_super_dt, cut_temp_dt)
-}
-
-train_super_dt <- train_super_dt %>% 
-    select(-relyear) %>% 
-    relocate(LM, .after = id) %>% 
-    arrange(id, LM)
-```
-
-```{r test dataset}
-test_id <- folds$splits[[1]] %>% 
-        rsample::assessment() %>% 
-        pull(id)
-
-test_dt <- dt[id %chin% test_id]
-
-test_pred_dt <- NULL
-
-for (lmx in landmark){
-    print(glue::glue("Processing landmark: {lmx}"))
-    
-    test_temp_long_dt <- test_dt %>% 
-        filter(relyear <= lmx)
-    
-    test_dt_y_pred <- NULL
-    
-    for (model_index in seq_along(model_list)){
-        response_name <- names(model_list)[[model_index]]
-        
-        dataset <- test_temp_long_dt %>% 
-            drop_na(!!response_name)
-        
-        dataset_outcome <- dataset %>% 
-            distinct(id, .keep_all = TRUE) %>% 
-            select(id, time_compete:status_compete_num, !!baseline_cov) %>% 
-            mutate(relyear = lmx)
-            
-        sigma <- model_list[[model_index]]$sigma
-        D <- getVarCov(model_list[[model_index]])
-        attr(D, "group.levels") <- NULL
-        
-        dataset_X_split <- split(data.frame(
-            model.matrix(terms_X, data = dataset)), dataset$id)
-        
-        dataset_Z_split <- split(data.frame(
-            model.matrix(terms_Z, data = dataset)), dataset$id)
-        
-        dataset_Y_split <- split(dataset[[response_name]], dataset$id)
-        
-        dataset_V <- lapply(dataset_Z_split, function(x){
-            as.matrix(x) %*% tcrossprod(D, as.matrix(x)) + diag(sigma^2, nrow(as.matrix(x)))
-        })
-        
-        test_b <- lapply(seq_len(length(dataset_X_split)), 
-                   function(i, x, y, z, v) { 
-                     tcrossprod(D, as.matrix(z[[i]])) %*%
-                       solve(v[[i]]) %*% (y[[i]] - as.matrix(x[[i]]) %*% fixef(model_list[[model_index]]))},
-                   x = dataset_X_split, y = dataset_Y_split, z = dataset_Z_split, v = dataset_V)
-        
-        test_b <- matrix(unlist(test_b), ncol = dim(b)[2], byrow = TRUE)
-        dataset_X_pred <- model.matrix(terms_X, data = dataset_outcome)
-        dataset_Z_pred <- model.matrix(terms_Z, data = dataset_outcome)
-        
-        dataset_outcome$test <- response_name
-        dataset_outcome$value <- as.vector(c(dataset_X_pred %*% fixef(model_list[[model_index]])) + 
-                                                       rowSums(dataset_Z_pred * test_b))
-        
-        test_dt_y_pred <- rbind(test_dt_y_pred, dataset_outcome)
-    }
-    test_dt_y_pred <- test_dt_y_pred %>% 
-        pivot_wider(names_from = test, values_from = value)
-    
-    test_pred_dt <- rbind(test_pred_dt, test_dt_y_pred)
-}
-
-test_super_dt <- NULL
-
-for(lmx in landmark){
-    test_super_temp <- cutLM(data = test_pred_dt, outcome = list(time = "time_compete",
-                                                  status = "status_compete_num"),
-                          LM = lmx,
-                          horizon = lmx + predict_horizon,
-                          covs = list(fixed = baseline_cov,
-                                      varying = longitudinal_cov),
-                          format = "long", id = "id", rtime = "relyear", right = FALSE)
-    test_super_dt <- rbind(test_super_dt, test_super_temp)
-}
-
-test_super_dt <- test_super_dt %>% 
-    select(-relyear) %>% 
-    relocate(LM, .after = id) %>% 
-    arrange(id, LM)
-```
-
-```{r performance}
-model_vimp <- NULL
-# model_cif <- NULL
-model_performance <- NULL
-
-# lmx <- 0.5
-for (lmx in landmark){
-    train_lm <- train_super_dt %>% 
-        filter(LM == lmx)
-    
-    test_lm <- test_super_dt %>% 
-        filter(LM == lmx)
-    
-    model_formula <- as.formula(str_c("Surv(time_compete, status_compete_num)",
-                   str_c(c(baseline_cov, longitudinal_cov), collapse = " + "), 
-                   sep = "~"))
-    
-    tune_rsf <- tune.rfsrc(model_formula, data = train_lm, mtryStart = 1, 
-           ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)),
-           sampsize = 0.623 * (nrow(train_lm)), stepFactor = 1.5)
-    
-    rsf_model <- rfsrc(formula = model_formula, data = train_lm, ntree = 1000, 
-          splitrule = "logrankCR", importance = TRUE, statistics = TRUE, 
-          mtry = tune_rsf$optimal[[2]], nodesize = tune_rsf$optimal[[1]])
-    
-    vimp_temp <- data.table(LM = lmx,
-                        event = c("eskd", "death"))
-    
-    vimp_temp <- cbind(vimp_temp, 100*t(rsf_model$importance))
-    
-    model_vimp <- rbind(model_vimp, vimp_temp)
-    
-    column_cif <- sindex(jump.times = rsf_model$time.interest, 
-                eval.times = seq(lmx, lmx + predict_horizon, 0.5))
-    column_cif[1] <- 1
-    
-    rsf_prediction <- predict.rfsrc(object = rsf_model,
-                         newdata = test_lm, na.action = "na.omit")
-    
-    test_no_missing <- test_lm %>%
-        drop_na()
-    
-    # eskd_cif <- rsf_prediction$cif[, column_cif, "CIF.1"]
-    # 
-    # colnames(eskd_cif) <- str_c("eskd", seq(lmx, lmx + predict_horizon, 0.5), 
-    #                             sep = "_")
-    # 
-    # death_cif <- rsf_prediction$cif[, column_cif, "CIF.2"]
-    # 
-    # colnames(death_cif) <- str_c("death", seq(lmx, lmx + predict_horizon, 0.5), 
-    #                             sep = "_")
-    # 
-    # cif_temp <- data.table(id = test_no_missing$id,
-    #                    LM = lmx,
-    #                    eskd_cif,
-    #                    death_cif)
-    # 
-    # cif_temp <- cif_temp %>% 
-    #     pivot_longer(cols = !c("id", "LM"), names_to = "variable", values_to = "value")
-    
-    # model_cif <- rbind(model_cif, cif_temp)
-    
-    brier_eskd <- pec(rsf_model, formula = model_formula, data = test_no_missing,
-                     cause = 1)
-    
-    brier_death <- pec(rsf_model, formula = model_formula, data = test_no_missing,
-                     cause = 2)
-    
-    error_temp <- unname(apply(rsf_prediction$err.rate, 2, sum, na.rm = TRUE))
-    
-    performance_temp <- data.table(LM = lmx,
-                               error_eskd = 100 * error_temp[1],
-                               error_death = 100 * error_temp[2],
-                               brier_eskd = crps(brier_eskd)[2],
-                               brier_death = crps(brier_death)[2])
-    
-    model_performance <- rbind(model_performance, performance_temp)
-}
-```
-
 ```{r cross validation}
 cv_vimp <- NULL
-# cv_cif <- NULL
 cv_performance <- NULL
-
 
 for (fold in 1:cross_val){
     print(glue::glue("Current fold: {fold}"))
@@ -331,10 +73,11 @@ for (fold in 1:cross_val){
     model_list <- vector(mode = "list", length = length(longitudinal_cov))
 
     # for (index in seq_along(longitudinal_cov)){
-    #     model_formula <- create_lme_formula(longitudinal_cov[index], 
+    #     model_formula <- create_lme_formula(longitudinal_cov[index],
     #                                         baseline_covariates = baseline_cov)
     #     model_list[[index]] <- create_lme_model(model_formula, train_dt)
     # }
+    
     for (index in seq_along(longitudinal_cov)){
     model <- create_lme_model_complex(longitudinal_cov[index], baseline_cov,
                                       dataset = train_dt)
@@ -358,10 +101,11 @@ for (fold in 1:cross_val){
             sigma <- model_list[[model_index]]$sigma
             betas <- fixef(model_list[[model_index]])
             
-            # terms_X <- as.formula(str_c(c("~relyear", baseline_cov), collapse = "+")) for simple linear mixed model
+            # terms_X <- as.formula(str_c(c("~relyear", baseline_cov), 
+            #                             collapse = "+")) # for simple linear mixed model
             
-            terms_X <- as.formula(str_c(c("~relyear", "I(relyear^2)", baseline_cov), 
-                                    collapse = "+"))
+            terms_X <- as.formula(str_c(c("~relyear", "I(relyear^2)", baseline_cov),
+                                    collapse = "+")) # for complex mixed model
             terms_Z <- formula(model_list[[model_index]]$modelStruct$reStruct[[1]])
             all_vars <- unique(c(all.vars(terms_X), all.vars(terms_Z)))
             dataset <- model_list[[model_index]]$data
@@ -479,7 +223,6 @@ for (fold in 1:cross_val){
         arrange(id, LM)
     
     model_vimp <- NULL
-    # model_cif <- NULL
     model_performance <- NULL
     
     for (lmx in landmark){
@@ -494,9 +237,8 @@ for (fold in 1:cross_val){
                        str_c(c(baseline_cov, longitudinal_cov), collapse = " + "), 
                        sep = "~"))
         
-        tune_rsf <- tune.rfsrc(model_formula, data = train_lm, mtryStart = 1, 
-               ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)),
-               sampsize = 0.623 * (nrow(train_lm)), stepFactor = 1.5)
+        tune_rsf <- tune.rfsrc(model_formula, data = train_lm, 
+                               ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)))
         
         rsf_model <- rfsrc(formula = model_formula, data = train_lm, ntree = 1000, 
               splitrule = "logrankCR", importance = TRUE, statistics = TRUE, 
@@ -509,35 +251,11 @@ for (fold in 1:cross_val){
         
         model_vimp <- rbind(model_vimp, vimp_temp)
         
-        # column_cif <- sindex(jump.times = rsf_model$time.interest, 
-        #             eval.times = seq(lmx, lmx + predict_horizon, 0.5))
-        # column_cif[1] <- 1
-        
         rsf_prediction <- predict.rfsrc(object = rsf_model,
                              newdata = test_lm, na.action = "na.omit")
         
         test_no_missing <- test_lm %>%
             drop_na()
-        
-        # eskd_cif <- rsf_prediction$cif[, column_cif, "CIF.1"]
-        # 
-        # colnames(eskd_cif) <- str_c("eskd", seq(lmx, lmx + predict_horizon, 0.5), 
-        #                             sep = "_")
-        # 
-        # death_cif <- rsf_prediction$cif[, column_cif, "CIF.2"]
-        # 
-        # colnames(death_cif) <- str_c("death", seq(lmx, lmx + predict_horizon, 0.5), 
-        #                             sep = "_")
-        # 
-        # cif_temp <- data.table(id = test_no_missing$id,
-        #                    LM = lmx,
-        #                    eskd_cif,
-        #                    death_cif)
-        # 
-        # cif_temp <- cif_temp %>% 
-        #     pivot_longer(cols = !c("id", "LM"), names_to = "variable", values_to = "value")
-        
-        # model_cif <- rbind(model_cif, cif_temp)
         
         brier_eskd <- pec(rsf_model, formula = model_formula, data = test_no_missing,
                          cause = 1)
@@ -545,7 +263,7 @@ for (fold in 1:cross_val){
         brier_death <- pec(rsf_model, formula = model_formula, data = test_no_missing,
                          cause = 2)
         
-        error_temp <- unname(apply(rsf_prediction$err.rate, 2, sum, na.rm = TRUE))
+        error_temp <- unname(apply(rsf_prediction$err.rate, 2, mean, na.rm = TRUE))
         
         performance_temp <- data.table(LM = lmx,
                                        N = rsf_prediction$n,
@@ -560,81 +278,22 @@ for (fold in 1:cross_val){
     model_vimp$fold <- fold
     cv_vimp <- rbind(cv_vimp, model_vimp)
     
-    # model_cif$fold <- fold
-    # cv_cif <- rbind(cv_cif, model_cif)
-    
     model_performance$fold <- fold
     cv_performance <- rbind(cv_performance, model_performance)
 }
+
+# vimp_name <- str_c(c("cv_lme_vimp", predict_horizon), collapse = "_") # simple linear mixed model
+vimp_name <- str_c(c("cv_lme_vimp", "poly", predict_horizon), collapse = "_")
+vimp_file_name <- str_c(c(vimp_name, ".gz"), collapse = "")
+fwrite(cv_vimp, file = vimp_file_name)
+
+# performance_name <- str_c(c("cv_lme_performance", predict_horizon), 
+#                           collapse = "_") # simple linear mixed model
+performance_name <- str_c(c("cv_lme_performance", "poly", predict_horizon), 
+                          collapse = "_")
+performance_file_name <- str_c(c(performance_name, ".gz"), collapse = "")
+fwrite(cv_performance, file = performance_file_name)
 ```
 
-```{r}
-cv_performance %>% 
-    select(-(brier_eskd:fold)) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
-    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>%  
-    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() + 
-    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 2 years", 
-         y = "Error Rate (%)") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) #universal setting
 
-
-cv_performance %>% 
-    select(-(error_eskd:error_death), -fold) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("brier_eskd", "brier_death"),
-                 names_to = "brier") %>% 
-    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
-                          labels = c("ESKD", "Death"))) %>%    
-    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() + 
-    labs(title = "Integrated Brier Score per Landmark with LOCF Prediction Horizon 2 years",
-         y = "Brier Score") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) +
-    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
-
-
-cv_vimp %>% 
-    filter(event == "eskd") %>% 
-    select(-event, -fold) %>% 
-    arrange(LM) %>% 
-    mutate(LM = factor(LM)) %>% 
-    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
-    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
-               fill = covariates)) + 
-    geom_boxplot() + 
-    coord_flip() + 
-    facet_grid(~ LM) + 
-    labs(title = "Variable Importance LOCF for 2 years ESKD Prediction per Landmark",
-         y = "Value") +  
-    theme_bw() + theme(axis.title.y = element_blank(), 
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
-
-cv_vimp %>% 
-    filter(event == "death") %>% 
-    select(-event, -fold) %>% 
-    arrange(LM) %>% 
-    mutate(LM = factor(LM)) %>% 
-    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
-    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
-               fill = covariates)) + 
-    geom_boxplot() + 
-    coord_flip() + 
-    facet_grid(~ LM) + 
-    labs(title = "Variable Importance LOCF for 2 years Death Prediction per Landmark",
-         y = "Value") +  
-    theme_bw() + theme(axis.title.y = element_blank(), 
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
-```
 

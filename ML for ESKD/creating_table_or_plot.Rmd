@@ -18,13 +18,13 @@ if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
 lib.ok <- sapply(libraries, require, character.only=TRUE)
 ```
 
-```{r C-index}
-locf2_dt <- fread("cv_lm_locf_performance_escl_2.gz")
-locf5_dt <- fread("cv_lm_locf_performance_excl_5.gz")
-lme2_dt <- fread("cv_lm_lme_performance_2.gz")
-lme5_dt <- fread("cv_lm_lme_performance_5.gz")
-lme2poly_dt <- fread("cv_lm_lme_poly_performance_2.gz")
-lme5poly_dt <- fread("cv_lm_lme_poly_performance_5.gz")
+```{r C-index 2y}
+locf2_dt <- fread("cv_locf_performance_2.gz")
+locf5_dt <- fread("cv_locf_performance_5.gz")
+lme2_dt <- fread("cv_lme_performance_2.gz")
+lme5_dt <- fread("cv_lme_performance_5.gz")
+lme2poly_dt <- fread("cv_lme_performance_poly_2.gz")
+lme5poly_dt <- fread("cv_lme_performance_poly_5.gz")
 
 plot1 <- locf2_dt %>% 
     select(-(brier_eskd:fold)) %>% 
@@ -39,7 +39,8 @@ plot1 <- locf2_dt %>%
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 2 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) + 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
 plot2 <- lme2_dt %>% 
@@ -49,13 +50,14 @@ plot2 <- lme2_dt %>%
     pivot_longer(cols = c("error_eskd", "error_death"),
                  names_to = "error") %>% 
     mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>%  
+                          labels = c("ESKD", "Death"))) %>% 
     ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
     facet_grid(~ LM) + scale_fill_nejm() + 
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with Mixed Model Prediction Horizon 2 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) + 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
 plot3 <- lme2poly_dt %>% 
@@ -65,13 +67,14 @@ plot3 <- lme2poly_dt %>%
     pivot_longer(cols = c("error_eskd", "error_death"),
                  names_to = "error") %>% 
     mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>%  
+                          labels = c("ESKD", "Death"))) %>% 
     ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
     facet_grid(~ LM) + scale_fill_nejm() + 
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with Mixed Model (poly) Prediction Horizon 2 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) + 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
 plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
@@ -84,7 +87,7 @@ dt1 <- locf2_dt %>%
     ungroup() %>% 
     select(LM, method, median_subject) %>% distinct()
 
-lme2_dt %>% 
+dt2 <- lme2_dt %>% 
     select(LM:N) %>% 
     mutate(method = "LME") %>% 
     group_by(LM) %>% 
@@ -92,17 +95,24 @@ lme2_dt %>%
     ungroup() %>% 
     select(LM, method, median_subject) %>% distinct()
 
-lme2poly_dt %>% 
+dt3 <- lme2poly_dt %>% 
     select(LM:N) %>% 
-    mutate(method = "LME") %>% 
+    mutate(method = "LME_poly") %>% 
     group_by(LM) %>% 
     mutate(median_subject = median(N)) %>% 
     ungroup() %>% 
     select(LM, method, median_subject) %>% distinct()
+
+gt_table <- rbindlist(list(dt1, dt2, dt3)) %>% 
+    pivot_wider(id_cols = "LM", names_from = method, 
+                values_from = median_subject) %>% 
+    gt(rowname_col = "LM") %>% 
+    tab_header(title = md("**Median Test Dataset Number Horizon 2y**")) %>% 
+    tab_stubhead(label = "Landmark")
 
 ```
 
-```{r}
+```{r C-index 5y}
 plot1 <- locf5_dt %>% 
     select(-(brier_eskd:fold)) %>% 
     arrange(LM) %>% 
@@ -116,7 +126,8 @@ plot1 <- locf5_dt %>%
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 5 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) + 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
 plot2 <- lme5_dt %>% 
@@ -132,7 +143,8 @@ plot2 <- lme5_dt %>%
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with Mixed Model Prediction Horizon 5 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) + 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
 plot3 <- lme5poly_dt %>% 
@@ -148,9 +160,606 @@ plot3 <- lme5poly_dt %>%
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with Mixed Model (poly) Prediction Horizon 5 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) + 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
 plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+
+dt1 <- locf5_dt %>% 
+    select(LM:N) %>% 
+    mutate(method = "LOCF") %>% 
+    group_by(LM) %>% 
+    mutate(median_subject = median(N)) %>% 
+    ungroup() %>% 
+    select(LM, method, median_subject) %>% distinct()
+
+dt2 <- lme5_dt %>% 
+    select(LM:N) %>% 
+    mutate(method = "Top10") %>% 
+    group_by(LM) %>% 
+    mutate(median_subject = median(N)) %>% 
+    ungroup() %>% 
+    select(LM, method, median_subject) %>% distinct()
+
+dt3 <- lme5poly_dt %>% 
+    select(LM:N) %>% 
+    mutate(method = "Top6") %>% 
+    group_by(LM) %>% 
+    mutate(median_subject = median(N)) %>% 
+    ungroup() %>% 
+    select(LM, method, median_subject) %>% distinct()
+
+dt4 <- top5_5_dt %>% 
+    select(LM:N) %>% 
+    mutate(method = "Top5") %>% 
+    group_by(LM) %>% 
+    mutate(median_subject = median(N)) %>% 
+    ungroup() %>% 
+    select(LM, method, median_subject) %>% distinct()
+
+gt_table <- rbindlist(list(dt1, dt2, dt3)) %>% 
+    pivot_wider(id_cols = "LM", names_from = method, 
+                values_from = median_subject) %>% 
+    gt(rowname_col = "LM") %>% 
+    tab_header(title = md("**Median Test Dataset Number Horizon 5y**")) %>% 
+    tab_stubhead(label = "Landmark")
 ```
+
+```{r Brier's 2y}
+plot1 <- locf2_dt %>% 
+    select(-(error_eskd:error_death), -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("brier_eskd", "brier_death"),
+                 names_to = "brier") %>% 
+    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
+                          labels = c("ESKD", "Death"))) %>%    
+    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() + 
+    labs(title = "Integrated Brier Score per Landmark with LOCF Prediction Horizon 2 years",
+         y = "Brier Score") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank()) +
+    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+plot2 <- lme2_dt %>% 
+    select(-(error_eskd:error_death), -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("brier_eskd", "brier_death"),
+                 names_to = "brier") %>% 
+    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
+                          labels = c("ESKD", "Death"))) %>%    
+    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() + 
+    labs(title = "Integrated Brier Score per Landmark with Mixed Model Prediction Horizon 2 years",
+         y = "Brier Score") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank()) +
+    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+plot3 <- lme2poly_dt %>% 
+    select(-(error_eskd:error_death), -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("brier_eskd", "brier_death"),
+                 names_to = "brier") %>% 
+    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
+                          labels = c("ESKD", "Death"))) %>%    
+    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() + 
+    labs(title = "Integrated Brier Score per Landmark with Mixed Model (poly) Prediction Horizon 2 years",
+         y = "Brier Score") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank()) +
+    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+```
+
+```{r Brier's 5y}
+plot1 <- locf5_dt %>% 
+    select(-(error_eskd:error_death), -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("brier_eskd", "brier_death"),
+                 names_to = "brier") %>% 
+    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
+                          labels = c("ESKD", "Death"))) %>%    
+    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() + 
+    labs(title = "Integrated Brier Score per Landmark with LOCF Prediction Horizon 5 years",
+         y = "Brier Score") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank()) +
+    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+plot2 <- lme5_dt %>% 
+    select(-(error_eskd:error_death), -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("brier_eskd", "brier_death"),
+                 names_to = "brier") %>% 
+    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
+                          labels = c("ESKD", "Death"))) %>%    
+    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() + 
+    labs(title = "Integrated Brier Score per Landmark with Mixed Model Prediction Horizon 5 years",
+         y = "Brier Score") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank()) +
+    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+plot3 <- lme5poly_dt %>% 
+    select(-(error_eskd:error_death), -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("brier_eskd", "brier_death"),
+                 names_to = "brier") %>% 
+    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
+                          labels = c("ESKD", "Death"))) %>%    
+    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() + 
+    labs(title = "Integrated Brier Score per Landmark with Mixed Model (poly) Prediction Horizon 5 years",
+         y = "Brier Score") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank()) +
+    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+```
+
+```{r vimp eskd 2y}
+vimp_locf2 <- fread("cv_locf_vimp_2.gz")
+vimp_locf5 <- fread("cv_locf_vimp_5.gz")
+vimp_lme2 <- fread("cv_lme_vimp_2.gz")
+vimp_lme5 <- fread("cv_lme_vimp_5.gz")
+vimp_lmepoly2 <- fread("cv_lme_vimp_poly_2.gz")
+vimp_lmepoly5 <- fread("cv_lme_vimp_poly_5.gz")
+
+plot1 <- vimp_locf2 %>% 
+    filter(event == "eskd") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance LOCF for 2 years ESKD Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot2 <- vimp_lme2 %>% 
+    filter(event == "eskd") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance Mixed Model for 2 years ESKD Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot3 <- vimp_lmepoly2 %>% 
+    filter(event == "eskd") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance Mixed Model (poly) for 2 years ESKD Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+```
+
+```{r vimp eskd 5y}
+plot1 <- vimp_locf5 %>% 
+    filter(event == "eskd") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance LOCF for 5 years ESKD Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot2 <- vimp_lme5 %>% 
+    filter(event == "eskd") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance Mixed Model for 5 years ESKD Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot3 <- vimp_lmepoly5 %>% 
+    filter(event == "eskd") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance Mixed Model (poly) for 5 years ESKD Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+```
+
+```{r vimp death 2y}
+plot1 <- vimp_locf2 %>% 
+    filter(event == "death") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance LOCF for 2 years Death Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot2 <- vimp_lme2 %>% 
+    filter(event == "death") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance Mixed Model for 2 years Death Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot3 <- vimp_lmepoly2 %>% 
+    filter(event == "death") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance Mixed Model (poly) for 2 years Death Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+```
+
+```{r vimp death 5y}
+plot1 <- vimp_locf5 %>% 
+    filter(event == "death") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance LOCF for 5 years Death Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot2 <- vimp_lme5 %>% 
+    filter(event == "death") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance Mixed Model for 5 years Death Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot3 <- vimp_lmepoly5 %>% 
+    filter(event == "death") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance Mixed Model (poly) for 5 years Death Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+```
+Based on the plot - there was no improvement of modelling the value using either base or complex linear mixed models. Hence, we investigated LOCF further. 
+```{r Vimp rank}
+locf2_vimp_eskd_rank <- vimp_locf2 %>% 
+    filter(event == "eskd") %>% 
+    select(-event) %>% 
+    group_by(LM) %>% 
+    select(-fold) %>% 
+    group_modify(~ {
+        .x %>% 
+            purrr::map_dfc(median)
+    }) %>% 
+    ungroup() %>% 
+    select(-LM) %>% 
+    map_dfc(~ median(.x))
+    
+locf5_vimp_eskd_rank <- vimp_locf5 %>% 
+    filter(event == "eskd") %>% 
+    select(-event) %>% 
+    group_by(LM) %>% 
+    select(-fold) %>% 
+    group_modify(~ {
+        .x %>% 
+            purrr::map_dfc(median)
+    }) %>% 
+    ungroup() %>% 
+    select(-LM) %>% 
+    map_dfc(~ median(.x))
+
+locf2_vimp_death_rank <- vimp_locf2 %>% 
+    filter(event == "death") %>% 
+    select(-event) %>% 
+    group_by(LM) %>% 
+    select(-fold) %>% 
+    group_modify(~ {
+        .x %>% 
+            purrr::map_dfc(median)
+    }) %>% 
+    ungroup() %>% 
+    select(-LM) %>% 
+    map_dfc(~ median(.x))
+    
+locf5_vimp_death_rank <- vimp_locf5 %>% 
+    filter(event == "death") %>% 
+    select(-event) %>% 
+    group_by(LM) %>% 
+    select(-fold) %>% 
+    group_modify(~ {
+        .x %>% 
+            purrr::map_dfc(median)
+    }) %>% 
+    ungroup() %>% 
+    select(-LM) %>% 
+    map_dfc(~ median(.x))
+
+vimp_rank <- rbindlist(list(locf2_vimp_death_rank, 
+                            locf2_vimp_eskd_rank, locf5_vimp_death_rank,
+                            locf5_vimp_eskd_rank))
+
+vimp_rank %>% 
+    map_dfc(~ median(.x)) %>% 
+    pivot_longer(cols = everything()) %>% 
+    slice_max(order_by = value, n = 10) %>% 
+    gt() %>% 
+    tab_header(title = md("**Combined VIMP LOCF Top 10 Covariates**")) %>% 
+    cols_label(name = "Co-variates")
+```
+
+```{r Error 2y LOCF Inspection}
+locf2_dt <- fread("cv_locf_performance_2.gz")
+locf5_dt <- fread("cv_locf_performance_5.gz")
+top10_2_dt <- fread("cv_locf_performance_top10_2.gz")
+top10_5_dt <- fread("cv_locf_performance_top10_5.gz")
+top6_2_dt <- fread("cv_locf_performance_top6_2.gz")
+top6_5_dt <- fread("cv_locf_performance_top6_5.gz")
+top5_2_dt <- fread("cv_locf_performance_top5_2.gz")
+top5_5_dt <- fread("cv_locf_performance_top5_5.gz")
+
+plot1 <- locf2_dt %>% 
+    select(-(brier_eskd:fold)) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>% 
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>% 
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() + 
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 2 years", 
+         y = "Error Rate (%)") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot2 <- top10_2_dt %>%
+    select(-(brier_eskd:fold)) %>%
+    arrange(LM) %>%
+    mutate(LM = as_factor(LM)) %>%
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>%
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>%
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() +
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Top10 VIMP 
+         Prediction Horizon 2 years",
+         y = "Error Rate (%)") +
+    theme_bw() + theme(axis.title.x = element_blank(),
+                       legend.title = element_blank(),
+                       legend.position = "none") +
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot3 <- top6_2_dt %>%
+    select(-(brier_eskd:fold)) %>%
+    arrange(LM) %>%
+    mutate(LM = as_factor(LM)) %>%
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>%
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>%
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() +
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Top6 VIMP 
+         Prediction Horizon 2 years",
+         y = "Error Rate (%)") +
+    theme_bw() + theme(axis.title.x = element_blank(),
+                       legend.title = element_blank(),
+                       legend.position = "none") +
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot4 <- top5_2_dt %>%
+    select(-(brier_eskd:fold)) %>%
+    arrange(LM) %>%
+    mutate(LM = as_factor(LM)) %>%
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>%
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>%
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() +
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Top5 VIMP 
+         Prediction Horizon 2 years",
+         y = "Error Rate (%)") +
+    theme_bw() + theme(axis.title.x = element_blank(),
+                       legend.title = element_blank(),
+                       legend.position = "none") +
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot1 + plot2 + plot3 + plot4 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+```
+
+```{r Error 5y LOCF Inspection}
+plot1 <- locf5_dt %>% 
+    select(-(brier_eskd:fold)) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>% 
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>%  
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() + 
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 5 years", 
+         y = "Error Rate (%)") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot2 <- top10_5_dt %>%
+    select(-(brier_eskd:fold)) %>%
+    arrange(LM) %>%
+    mutate(LM = as_factor(LM)) %>%
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>%
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>%
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() +
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Top10 VIMP 
+         Prediction Horizon 5 years",
+         y = "Error Rate (%)") +
+    theme_bw() + theme(axis.title.x = element_blank(),
+                       legend.title = element_blank(),
+                       legend.position = "none") +
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot3 <- top6_5_dt %>%
+    select(-(brier_eskd:fold)) %>%
+    arrange(LM) %>%
+    mutate(LM = as_factor(LM)) %>%
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>%
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>%
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() +
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Top6 VIMP 
+         Prediction Horizon 5 years",
+         y = "Error Rate (%)") +
+    theme_bw() + theme(axis.title.x = element_blank(),
+                       legend.title = element_blank(),
+                       legend.position = "none") +
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot4 <- top5_5_dt %>%
+    select(-(brier_eskd:fold)) %>%
+    arrange(LM) %>%
+    mutate(LM = as_factor(LM)) %>%
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>%
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>%
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_nejm() +
+    labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Top5 VIMP 
+         Prediction Horizon 5 years",
+         y = "Error Rate (%)") +
+    theme_bw() + theme(axis.title.x = element_blank(),
+                       legend.title = element_blank(),
+                       legend.position = "none") +
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot1 + plot2 + plot3 + plot4 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+```
+
 
