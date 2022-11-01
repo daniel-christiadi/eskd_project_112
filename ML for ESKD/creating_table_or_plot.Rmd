@@ -118,17 +118,19 @@ plot1 <- locf5_dt %>%
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 
     pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
+                 names_to = "error") %>%
     mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>%  
+                          labels = c("ESKD", "Death"))) %>% 
     ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() + 
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 5 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
                        legend.title = element_blank(),
                        legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) 
+
+ggsave("locf_c5.png", plot1, width = 12, height = 7, scale = 0.5)
 
 plot2 <- lme5_dt %>% 
     select(-(brier_eskd:fold)) %>% 
@@ -139,13 +141,17 @@ plot2 <- lme5_dt %>%
     mutate(error = factor(error, levels = c("error_eskd", "error_death"),
                           labels = c("ESKD", "Death"))) %>%  
     ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() + 
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with Mixed Model Prediction Horizon 5 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
                        legend.title = element_blank(),
                        legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot2
+
+ggsave("lme_c5.png", plot2, width = 12, height = 7, scale = 0.5)
 
 plot3 <- lme5poly_dt %>% 
     select(-(brier_eskd:fold)) %>% 
@@ -164,7 +170,7 @@ plot3 <- lme5poly_dt %>%
                        legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
-plot1 + plot2 + plot3 + guide_area() + plot_layout(ncol = 2, guides = "collect")
+plot1 + plot2 + guide_area() + plot_layout(ncol = 1, guides = "collect")
 
 dt1 <- locf5_dt %>% 
     select(LM:N) %>% 
@@ -223,6 +229,8 @@ plot1 <- locf2_dt %>%
                        legend.title = element_blank()) +
     scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
 
+
+
 plot2 <- lme2_dt %>% 
     select(-(error_eskd:error_death), -fold) %>% 
     arrange(LM) %>% 
@@ -268,12 +276,16 @@ plot1 <- locf5_dt %>%
     mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
                           labels = c("ESKD", "Death"))) %>%    
     ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() + 
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
     labs(title = "Integrated Brier Score per Landmark with LOCF Prediction Horizon 5 years",
          y = "Brier Score") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) +
+                       legend.title = element_blank(),
+                       legend.position = "none") +
     scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+ggsave("locf_brier5.png", plot1, width = 12, height = 7, scale = 0.5)
+
 
 plot2 <- lme5_dt %>% 
     select(-(error_eskd:error_death), -fold) %>% 
@@ -284,12 +296,17 @@ plot2 <- lme5_dt %>%
     mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
                           labels = c("ESKD", "Death"))) %>%    
     ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() + 
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
     labs(title = "Integrated Brier Score per Landmark with Mixed Model Prediction Horizon 5 years",
          y = "Brier Score") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank()) +
+                       legend.title = element_blank(),
+                       legend.position = "none") +
     scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+plot2
+
+ggsave("lme_brier5.png", plot2, width = 12, height = 7, scale = 0.5)
 
 plot3 <- lme5poly_dt %>% 
     select(-(error_eskd:error_death), -fold) %>% 
@@ -684,6 +701,8 @@ plot4 <- top5_2_dt %>%
                        legend.position = "none") +
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
+ggsave("locf_top5c5.png", plot4, width = 12, height = 7, scale = 0.5)
+
 plot1 + plot2 + plot3 + plot4 + guide_area() + plot_layout(ncol = 2, guides = "collect")
 ```
 
@@ -704,6 +723,8 @@ plot1 <- locf5_dt %>%
                        legend.title = element_blank(),
                        legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot1
 
 plot2 <- top10_5_dt %>%
     select(-(brier_eskd:fold)) %>%
@@ -750,7 +771,7 @@ plot4 <- top5_5_dt %>%
     mutate(error = factor(error, levels = c("error_eskd", "error_death"),
                           labels = c("ESKD", "Death"))) %>%
     ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_nejm() +
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) +
     labs(title = "Error Rate (1 - Harrell's C-index) per Landmark with LOCF Top5 VIMP 
          Prediction Horizon 5 years",
          y = "Error Rate (%)") +
@@ -758,6 +779,8 @@ plot4 <- top5_5_dt %>%
                        legend.title = element_blank(),
                        legend.position = "none") +
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+plot4
 
 plot1 + plot2 + plot3 + plot4 + guide_area() + plot_layout(ncol = 2, guides = "collect")
 ```

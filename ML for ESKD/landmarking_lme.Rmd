@@ -23,7 +23,7 @@ lib.ok <- sapply(libraries, require, character.only=TRUE)
 source("utility_functions.R")
 cross_val <- 5
 seed <- 7
-predict_horizon <- 5 #5
+predict_horizon <- 5 #2
 landmark <- c(0.5, 1, 1.5, 2, 2.5, 3)
 
 longitudinal_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride", 

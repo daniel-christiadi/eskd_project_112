@@ -1377,10 +1377,10 @@ dt <- meta_dt %>%
     select(-date_egfr_init)
 saveRDS(dt, "dense3.RDS")
 
-dt <- meta_dt %>% 
-    filter(id %in% tangri3_id) %>% 
-    select(-date_egfr_init)
-saveRDS(dt, "tangri3.RDS")
+# dt <- meta_dt %>% 
+#     filter(id %in% tangri3_id) %>% 
+#     select(-date_egfr_init)
+# saveRDS(dt, "tangri3.RDS")
 ```
 
 ```{r function to assess outcome based on filtered ids}

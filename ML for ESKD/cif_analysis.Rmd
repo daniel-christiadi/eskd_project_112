@@ -1,0 +1,274 @@
+---
+title: "cif_analysis"
+author: "Daniel Christiadi"
+date: "Compiled on `r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, results = 'asis', collapse = TRUE)
+
+libraries <- c("tidyverse", "data.table", "skimr", "ggsci", "gt", "patchwork", 
+               "tidymodels")
+               
+installed <- installed.packages()[,'Package']
+new.libs <- libraries[!(libraries %in% installed)]
+if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
+                                      dependencies=TRUE)
+
+lib.ok <- sapply(libraries, require, character.only=TRUE)
+source("utility_functions.R")
+seed <- 7
+predict_horizon <- 5 #2
+landmark <- c(0.5, 1, 1.5, 2, 2.5, 3)
+longi_cov <- c("egfr", "haemoglobin", "albumin", "chloride", "glucose") #top 5
+
+# longi_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride",
+#                 "egfr", "glucose", "haemoglobin", "phosphate", "platelet",
+#                 "potassium", "sodium", "wcc") # full
+
+# base_cov <- c("age_init", "sex") #full model
+base_cov <- c("age_init")  #Top5 model
+```
+
+```{r extract value, slope, and delta_slope}
+train_dt <- read_rds("top5_train_dt.gz")
+train_eskd_cif_dt <- fread("top5_train_eskd_cif_5.gz")
+train_death_cif_dt <- fread("top5_train_death_cif_5.gz")
+test_dt <- read_rds("top5_test_dt.gz")
+test_eskd_cif_dt <- fread("top5_test_eskd_cif_5.gz")
+test_death_cif_dt <- fread("top5_test_death_cif_5.gz")
+
+eskd_train <- extract_cif_feature(outcome_dt = train_dt,
+                               train_test_dt = train_eskd_cif_dt,
+                               outcome = "eskd")
+
+eskd_test <- extract_cif_feature(outcome_dt = test_dt,
+                                 train_test_dt = test_eskd_cif_dt,
+                                 outcome = "eskd")
+
+death_train <- extract_cif_feature(outcome_dt = train_dt,
+                                   train_test_dt = train_death_cif_dt,
+                                   outcome = "death")    
+
+death_test <- extract_cif_feature(outcome_dt = test_dt,
+                                  train_test_dt = test_death_cif_dt,
+                                  outcome = "death")
+```
+
+```{r eskd_cif}
+set.seed(seed)
+eskd_fold <- vfold_cv(eskd_train, v = 5, strata = event)
+eskd_split <- initial_split(eskd_train, strata = event)
+eskd_train_fold1 <- eskd_fold$splits[[1]] %>% analysis()
+
+rf_model <- rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>% 
+    set_engine("ranger", importance = "impurity") %>% 
+    set_mode("classification")
+
+rf_recipe <- recipe(event ~ ., data = eskd_train_fold1) %>%  
+    update_role(id,new_role = "id") %>% 
+    step_rm(status_compete, time_compete) %>% 
+    themis::step_smote(event, over_ratio = 1)
+
+rf_workflow <- workflow() %>% 
+    add_model(rf_model) %>% 
+    add_recipe(rf_recipe)
+
+rf_params <- rf_workflow %>% 
+    parameters() %>% 
+    update(mtry = mtry(c(1, 5)))
+    
+rf_metrics <- metric_set(precision, mcc, j_index)
+
+library(doParallel)
+no_cores <- detectCores() - 2
+clust <- makePSOCKcluster(no_cores)
+registerDoParallel(clust)
+
+rf_tuning <- 
+    rf_workflow %>% 
+    tune_grid(eskd_fold,
+              grid = rf_params %>% grid_random(size = 100, original = FALSE),
+              metrics = rf_metrics, 
+              control = control_resamples(save_pred = TRUE))
+
+stopCluster(clust)
+
+show_best(rf_tuning, metric = "precision")
+show_best(rf_tuning, metric = "mcc")
+show_best(rf_tuning, metric = "j_index")
+
+best_precision <- select_best(rf_tuning, metric = "precision")
+
+final_rf_workflow <- rf_workflow %>% 
+    finalize_workflow(best_precision)
+
+final_rf_fit <- final_rf_workflow %>% 
+    last_fit(split = eskd_split,
+             metrics = metric_set(recall, precision, accuracy, specificity, mcc, roc_auc))
+
+train_roc <- final_rf_fit %>% 
+    collect_predictions() %>% 
+    roc_curve(event, .pred_yes, event_level = "second")
+
+train_pr <- final_rf_fit %>% 
+    collect_predictions() %>% 
+    pr_curve(event, .pred_yes, event_level = "second")
+
+train_threshold <- train_roc %>% 
+    mutate(youden = sensitivity + specificity-1) %>% 
+    slice_max(youden) %>% 
+    pull(.threshold)
+    
+final_rf_fit %>%
+    extract_workflow() %>%
+    extract_fit_parsnip() %>%
+    vip::vip()
+
+final_rf_model <- final_rf_workflow %>% 
+    fit(eskd_train)
+
+eskd_test_pred <- eskd_test %>% 
+    bind_cols(predict(final_rf_model, eskd_test, type = "prob")) %>% 
+    bind_cols(predict(final_rf_model, eskd_test, type = "class")) %>% 
+    mutate(event_manual = if_else(
+        condition = .pred_yes > train_threshold,
+        true = "yes",
+        false = "no"),
+        event_manual = factor(event_manual, levels = c("no", "yes"))
+    )
+
+eskd_roc_curve <- roc_curve(eskd_test_pred, truth = event, .pred_yes, event_level = "second")
+autoplot(eskd_roc_curve)
+
+eskd_roc_auc <- roc_auc(eskd_test_pred, truth = event, estimate = .pred_yes, 
+                        event_level = "second")
+
+eskd_pr_curve <- pr_curve(eskd_test_pred, truth = event, .pred_yes, event_level = "second")
+autoplot(eskd_pr_curve)
+
+eskd_pr_auc <- pr_auc(eskd_test_pred, truth = event, estimate = .pred_yes,
+                    event_level = "second")
+
+evaluation_metrics <- metric_set(accuracy, mcc, recall, spec, ppv, npv)
+evaluation_metrics(eskd_test_pred, truth = event, estimate = event_manual, 
+                   event_level = "second") %>% select(-.estimator) %>% gt()
+
+conf_mat(eskd_test_pred, truth = event, estimate = event_manual)
+caret::confusionMatrix(eskd_test_pred$event_manual, reference = eskd_test_pred$event,
+                       positive = "yes")
+```
+
+```{r death_cif}
+set.seed(seed)
+death_fold <- vfold_cv(death_train, v = 5, strata = event)
+death_split <- initial_split(death_train, strata = event)
+death_train_fold1 <- death_fold$splits[[1]] %>% analysis()
+
+rf_model <- rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>% 
+    set_engine("ranger", importance = "impurity") %>% 
+    set_mode("classification")
+
+rf_recipe <- recipe(event ~ ., data = death_train_fold1) %>%  
+    update_role(id,new_role = "id") %>% 
+    step_rm(status_compete, time_compete) %>% 
+    themis::step_smote(event, over_ratio = 1)
+
+rf_workflow <- workflow() %>% 
+    add_model(rf_model) %>% 
+    add_recipe(rf_recipe)
+
+rf_params <- rf_workflow %>% 
+    parameters() %>% 
+    update(mtry = mtry(c(1, 5)))
+    
+rf_metrics <- metric_set(precision, mcc, j_index)
+
+library(doParallel)
+no_cores <- detectCores() - 2
+clust <- makePSOCKcluster(no_cores)
+registerDoParallel(clust)
+
+rf_tuning <- 
+    rf_workflow %>% 
+    tune_grid(death_fold,
+              grid = rf_params %>% grid_random(size = 100, original = FALSE),
+              metrics = rf_metrics, 
+              control = control_resamples(save_pred = TRUE))
+
+stopCluster(clust)
+
+show_best(rf_tuning, metric = "precision")
+show_best(rf_tuning, metric = "mcc")
+show_best(rf_tuning, metric = "j_index")
+
+best_precision <- select_best(rf_tuning, metric = "precision")
+
+final_rf_workflow <- rf_workflow %>% 
+    finalize_workflow(best_precision)
+
+final_rf_fit <- final_rf_workflow %>% 
+    last_fit(split = death_split,
+             metrics = metric_set(recall, precision, accuracy, specificity, mcc, roc_auc))
+
+train_roc <- final_rf_fit %>% 
+    collect_predictions() %>% 
+    roc_curve(event, .pred_yes, event_level = "second")
+
+train_pr <- final_rf_fit %>% 
+    collect_predictions() %>% 
+    pr_curve(event, .pred_yes, event_level = "second")
+
+train_threshold <- train_roc %>% 
+    mutate(youden = sensitivity + specificity-1) %>% 
+    slice_max(youden) %>% 
+    pull(.threshold)
+    
+final_rf_fit %>%
+    extract_workflow() %>%
+    extract_fit_parsnip() %>%
+    vip::vip()
+
+final_rf_model <- final_rf_workflow %>% 
+    fit(death_train)
+
+death_test_pred <- death_test %>% 
+    bind_cols(predict(final_rf_model, death_test, type = "prob")) %>% 
+    bind_cols(predict(final_rf_model, death_test, type = "class")) %>% 
+    mutate(event_manual = if_else(
+        condition = .pred_yes > train_threshold,
+        true = "yes",
+        false = "no"),
+        event_manual = factor(event_manual, levels = c("no", "yes"))
+    )
+
+death_roc_curve <- roc_curve(death_test_pred, truth = event, .pred_yes, 
+                             event_level = "second")
+autoplot(death_roc_curve)
+
+death_roc_auc <- roc_auc(death_test_pred, truth = event, estimate = .pred_yes, 
+                        event_level = "second")
+
+death_pr_curve <- pr_curve(death_test_pred, truth = event, .pred_yes, event_level = "second")
+autoplot(death_pr_curve)
+
+death_pr_auc <- pr_auc(death_test_pred, truth = event, estimate = .pred_yes,
+                    event_level = "second")
+
+evaluation_metrics <- metric_set(accuracy, mcc, recall, spec, ppv, npv)
+evaluation_metrics(death_test_pred, truth = event, estimate = event_manual, 
+                   event_level = "second") %>% select(-.estimator) %>% gt()
+
+conf_mat(death_test_pred, truth = event, estimate = event_manual)
+caret::confusionMatrix(death_test_pred$event_manual, reference = death_test_pred$event,
+                       positive = "yes")
+```
+
+
+
+
+
+
