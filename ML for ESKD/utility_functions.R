@@ -2,6 +2,49 @@ library(tidyverse)
 library(data.table)
 library(nlme)
 
+recovery_check <- function(nested_df){
+    modality <- nested_df$modality
+    # modality <- modality[!duplicated(modality)]
+    eskd <- c('Haemodiafiltration', 'Haemofiltration', 'HD', 'PD', 'Nocturnal HD')
+    recovered <- c('CKD', 'CKD (4-5)', 'Outpatient')
+    result <- list()
+    
+    for (index in seq_along(modality)){
+        if ((modality[index] %in% eskd) & (modality[index+1] %in% recovered)){
+            result <- append(result, 1)
+        } else {
+            result <- append(result, 0)
+        }
+    }
+    as_vector(result)
+}
+
+extracting_freq <- function(meta_dt){
+    test_names <- meta_dt %>% 
+        count(test) %>% 
+        pull(test)
+    
+    id_dt <- meta_dt %>% 
+        distinct(id) %>% 
+        data.table()
+    
+    setkey(id_dt, id)
+    
+    dt <- meta_dt %>% 
+        select(id, test, value) %>% 
+        data.table()
+    
+    setkey(dt, id)
+    
+    for (test_name in test_names){
+        m <- dt[test == test_name]
+        n <- m[, .N, by = id]
+        setnames(n, old = 'N', new = test_name)
+        setkey(n, id)
+        id_dt <- n[id_dt]
+    }
+    id_dt
+}
 
 create_lme_formula <- function(y_name, baseline_covariates){
     lme_formula <- as.formula(str_c({{y_name}},
