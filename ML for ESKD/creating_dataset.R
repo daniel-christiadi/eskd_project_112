@@ -1,5 +1,5 @@
 libraries <- c('readxl', 'tidyverse', 'janitor', 'skimr', 'heatmaply', 
-               'data.table', 'gtsummary', 'lubridate')
+               'data.table', 'lubridate')
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -1425,7 +1425,6 @@ write_rds(features_dt, features_file_name)
 outcome_file_name <- str_c(approach, "_outcome.rds")
 write_rds(outcome_dt, outcome_file_name)
 
-
 # resampled dataset heatmap ------------------------------------------------
 
 outcome_dt <- read_rds("main_outcome.rds")
@@ -1497,7 +1496,6 @@ heatmaply(x = t(as.matrix(dense3_matrix)), ylab = 'Features', xlab = 'Patients',
                                                        direction = -1,
                                                        na.value='white'))    
 
-
 # sensitivity analysis incorporating albumin-creatinine ratio >= 3 times----
 
 acr3_id <- meta_freq %>%
@@ -1509,6 +1507,8 @@ acr3_dt <- meta_dt %>%
 
 file_name <- str_c(approach, "acr3_dt.rds", sep = "_")
 write_rds(acr3_dt, file_name)
+
+# end ---------------------------------------------------------------------
 
 
 

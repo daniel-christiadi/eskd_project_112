@@ -24,42 +24,49 @@ predict_horizon <- 5 #2
 landmark <- c(0.5, 1, 1.5, 2, 2.5, 3)
 
 # full model # r/o: "urea", "creatinine"
-# longi_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride",
-#                 "egfr", "glucose", "haemoglobin", "phosphate", "platelet",
-#                 "potassium", "sodium", "wcc") 
+longi_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride",
+                "egfr", "glucose", "haemoglobin", "phosphate", "platelet",
+                "potassium", "sodium", "wcc")
+
 
 # longi_cov <- c("albumin", "alkphos", "chloride", "egfr", "haemoglobin", "phosphate",
 #                 "potassium", "sodium", "wcc") # Top 10
 
 # longi_cov <- c("albumin", "chloride", "egfr", "haemoglobin", "sodium") # Top 6
-longi_cov <- c("albumin", "chloride", "egfr", "haemoglobin") # Top 5
+# longi_cov <- c("albumin", "chloride", "egfr", "haemoglobin") # Top 5
 
 # full model # r/o: "value_egfr_init"
-# base_cov <- c("sex", "age_init", "gn_cat")  
-base_cov <- c("age_init") # reduced model
+base_cov <- c("sex", "age_init", "gn_fct")
+# base_cov <- c("age_init") # reduced model
 ```
 
 ```{r k-fold}
-dt <- read_rds("dense3.RDS")
+dt <- read_rds("main_dense3_dt.rds")
+
+dt <- data.table(dt)
 
 dt <- dcast(dt, 
-      id + relyear + value_egfr_init + sex + age_init + gn_cat + time_compete +
+      id + relyear + sex + age_init + gn_cat + time_compete +
           status_compete ~ test, value.var = "value")
 
 dt <- dt %>% 
-    mutate(status_compete_num = case_when(
-      status_compete == "censored" ~ 0,
-      status_compete == "eskd" ~ 1,
-      TRUE ~ 2
-    )) %>% 
-    relocate(status_compete_num, .after = status_compete) %>% 
-    mutate(sex = factor(sex, levels = c("Female", "Male")),
-           gn_cat = factor(gn_cat, levels = c("no", "yes")))
+        mutate(status_compete = replace(status_compete, 
+                                        status_compete == "no", "censored")) %>% 
+        mutate(status_compete_num = case_when(
+            status_compete == "censored" ~ 0,
+            status_compete == "eskd" ~ 1,
+            .default = 2
+        )) %>% 
+        relocate(status_compete_num, .after = status_compete) %>% 
+        mutate(sex = factor(sex, levels = c("Female", "Male")),
+               gn_fct = if_else(is.na(gn_cat), "no", "yes")) %>% 
+        relocate(gn_fct, .after = gn_cat) %>% 
+        mutate(gn_fct = factor(gn_fct, levels = c("no", "yes")))
 
 set.seed(seed)
 
 folds <- dt %>% 
-    select(id, value_egfr_init:status_compete) %>% 
+    select(id, sex:status_compete) %>% 
     distinct(id, .keep_all = TRUE) %>% 
     rsample::vfold_cv(v = cross_val, strata = "status_compete")
 ```
@@ -202,10 +209,129 @@ for (fold in 1:cross_val){
 #                           collapse = "_")
 # performance_name <- str_c(c("cv_locf_performance_top6", predict_horizon),
 #                           collapse = "_")
-performance_name <- str_c(c("cv_locf_performance_top5", predict_horizon),
-                          collapse = "_")
-performance_file_name <- str_c(c(performance_name, ".gz"), collapse = "")
-fwrite(cv_performance, file = performance_file_name)
+# performance_name <- str_c(c("cv_locf_performance_top5", predict_horizon),
+#                           collapse = "_")
+# performance_file_name <- str_c(c(performance_name, ".gz"), collapse = "")
+# fwrite(cv_performance, file = performance_file_name)
+```
+
+```{r}
+cv_performance
+
+error1 <- cv_performance %>% 
+    select(-(brier_eskd:fold)) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("error_eskd", "error_death"),
+                 names_to = "error") %>% 
+    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
+                          labels = c("ESKD", "Death"))) %>% 
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
+    labs(title = "Dense3 Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 5 years", 
+         y = "Error Rate (%)") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) 
+
+brier1 <- cv_performance %>% 
+    select(-(error_eskd:error_death), -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("brier_eskd", "brier_death"),
+                 names_to = "brier") %>% 
+    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
+                          labels = c("ESKD", "Death"))) %>%    
+    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
+    labs(title = "Dense3 Integrated Brier Score per Landmark with LOCF Prediction Horizon 5 years",
+         y = "Brier Score") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank(),
+                       legend.position = "none") +
+    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+
+```
+
+```{r vimp dense3 locf}
+vimp <- read_rds("dense3_locf_vimp.rds")
+
+plot1 <- vimp %>% 
+    filter(event == "eskd") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates, value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance LOCF for 5 years ESKD Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+plot2 <- vimp %>% 
+    filter(event == "death") %>% 
+    select(-event, -fold) %>% 
+    arrange(LM) %>% 
+    mutate(LM = factor(LM)) %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_grid(~ LM) + 
+    labs(title = "Variable Importance LOCF for 5 years Death Prediction per Landmark",
+         y = "Value") +  
+    theme_bw() + theme(axis.title.y = element_blank(), 
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 70)) #universal setting
+
+(plot1 / plot2) + plot_annotation(
+    title = "Dense3 ESKD vs Death VIMP"
+)
+```
+
+```{r}
+vimp_eskd_rank <- vimp %>% 
+    filter(event == "eskd") %>% 
+    select(-event) %>% 
+    group_by(LM) %>% 
+    select(-fold) %>% 
+    group_modify(~ {
+        .x %>% 
+            purrr::map_dfc(median)
+    }) %>% 
+    ungroup() %>% 
+    select(-LM) %>% 
+    map_dfc(~ median(.x))
+
+vimp_death_rank <- vimp %>% 
+    filter(event == "death") %>% 
+    select(-event) %>% 
+    group_by(LM) %>% 
+    select(-fold) %>% 
+    group_modify(~ {
+        .x %>% 
+            purrr::map_dfc(median)
+    }) %>% 
+    ungroup() %>% 
+    select(-LM) %>% 
+    map_dfc(~ median(.x))
+
+vimp_rank <- rbindlist(list(vimp_eskd_rank, vimp_death_rank))
+
+vimp_rank %>% 
+    map_dfc(~ median(.x)) %>% 
+    pivot_longer(cols = everything()) %>% 
+    slice_max(order_by = value, n = 10) %>% 
+    gt() %>% 
+    tab_header(title = md("**Combined VIMP LOCF Top 10 Covariates**")) %>% 
+    cols_label(name = "Co-variates")
 ```
 
 ```{r EDA}
