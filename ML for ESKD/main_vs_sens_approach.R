@@ -1,6 +1,6 @@
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
                "dynpred", "prodlim", "mice", "randomForestSRC", "pec", 
-               "gtsummary", "patchwork")
+               "gtsummary", "patchwork", "future", "furrr")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -18,168 +18,57 @@ longi_cov <- c("albumin", "alkphos", "bicarb", "calcium", "chloride",
 
 base_cov <- c("sex", "age_init", "gn_fct")
 approach <- list("main", "sens")
+source("utility_functions.R")
 
 # performance cross-validation --------------------------------------------
 
-cv_performance <- NULL
+main_sens_dt <- tibble(
+    method = c("main", "sens"),
+    file_name = rep("dense3_dt.rds", times=2),
+    base_cov = list(base_cov, base_cov),
+    longi_cov = list(longi_cov, longi_cov)
+)
 
-for (method in approach){
-    print(glue::glue("Analysing: {method}"))
-    
-    dataset_name <- str_c(method, "dense3_dt.rds", sep = "_")
-    
-    dt <- read_rds(dataset_name)
-    
-    dt <- dt %>% 
-        pivot_wider(names_from = test, 
-                    values_from = value)
-    
-    dt <- dt %>% 
-        mutate(status_compete = replace(status_compete, 
-                                        status_compete == "no", "censored")) %>% 
-        mutate(status_compete_num = case_when(
-            status_compete == "censored" ~ 0,
-            status_compete == "eskd" ~ 1,
-            .default = 2
-        )) %>% 
-        relocate(status_compete_num, .after = status_compete) %>% 
-        mutate(sex = factor(sex, levels = c("Female", "Male")),
-               gn_fct = if_else(is.na(gn_cat), "no", "yes")) %>% 
-        relocate(gn_fct, .after = gn_cat) %>% 
-        mutate(gn_fct = factor(gn_fct, levels = c("no", "yes")))
-    
-    set.seed(seed)
-    
-    folds <- dt %>% 
-        select(id, sex:status_compete_num) %>% 
-        distinct(id, .keep_all = TRUE) %>% 
-        rsample::vfold_cv(v = cross_val, strata = "status_compete")
-    
-    for (fold in 1:cross_val){
-        print(glue::glue("Current fold: {fold}"))
-        
-        train_id <- folds$splits[[fold]] %>% 
-            rsample::analysis() %>% 
-            pull(id)
-        
-        test_id <- folds$splits[[fold]] %>% 
-            rsample::assessment() %>% 
-            pull(id)
-        
-        train_dt <- dt %>% 
-            filter(id %in% train_id)
-        
-        test_dt <- dt %>% 
-            filter(id %in% test_id)
-        
-        long_train <- train_dt %>%
-            select(id, relyear, !!longi_cov)
-        
-        ## imputing covariates at relyear == 0   
-        impute_dt <- long_train %>% 
-            filter(relyear == 0)
-        
-        temp_dt <- mice(impute_dt, m = 1, maxit = 50, method = "pmm", seed = seed)
-        impute_dt <- complete(temp_dt)
-        
-        train_dt <- impute_dt %>% 
-            bind_rows(long_train) %>% 
-            arrange(id) %>% 
-            distinct(id, relyear, .keep_all = TRUE) %>%
-            group_by(id) %>%
-            fill(!!longi_cov) %>% 
-            ungroup() %>% 
-            left_join(select(train_dt, id:status_compete_num),
-                      by = c("id", "relyear")) %>% 
-            arrange(id, relyear) %>% 
-            as.data.table()
-        
-        test_dt <- test_dt %>% 
-            group_by(id) %>% 
-            fill(!!longi_cov) %>% 
-            ungroup() %>% 
-            as.data.table()
-        
-        train_super_dt <- NULL
-        
-        for (i in seq_along(landmark)) {
-            temp <- cutLM(data = train_dt, outcome = list(time = "time_compete",
-                                                          status = "status_compete_num"),
-                          LM = landmark[i], horizon = landmark[i] + predict_horizon,
-                          covs = list(fixed = base_cov, varying = longi_cov),
-                          format = "long", id = "id", rtime = "relyear", 
-                          right = FALSE) 
-            train_super_dt <- rbind(train_super_dt, temp)
-        }
-        
-        test_super_dt <- NULL
-        
-        for (i in seq_along(landmark)) {
-            temp <- cutLM(data = test_dt, outcome = list(time = "time_compete",
-                                                         status = "status_compete_num"),
-                          LM = landmark[i], horizon = landmark[i] + predict_horizon, 
-                          covs = list(fixed = base_cov, varying = longi_cov),
-                          format = "long", id = "id", rtime = "relyear", 
-                          right = FALSE) 
-            test_super_dt <- rbind(test_super_dt, temp)
-        }
-        
-        model_performance <- NULL
-        
-        for (lmx in landmark){
-            print(glue::glue("Processing landmark: {lmx}"))
-            
-            train_lm <- train_super_dt %>% 
-                filter(LM == lmx)
-            
-            test_lm <- test_super_dt %>% 
-                filter(LM == lmx) %>% 
-                drop_na()
-            
-            model_formula <- as.formula(str_c("Surv(time_compete, status_compete_num)",
-                                              str_c(c(base_cov, longi_cov), collapse = " + "), 
-                                              sep = "~"))
-            
-            tune_rsf <- tune.rfsrc(model_formula, data = train_lm, 
-                                   ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)))
-            
-            rsf_model <- rfsrc(formula = model_formula, data = train_lm, ntree = 1000, 
-                               splitrule = "logrankCR", importance = TRUE, statistics = TRUE, 
-                               mtry = tune_rsf$optimal[[2]], nodesize = tune_rsf$optimal[[1]])
-            
-            rsf_prediction <- predict.rfsrc(object = rsf_model,
-                                            newdata = test_lm, na.action = "na.omit")
-            
-            brier_eskd <- pec(rsf_model, formula = model_formula, data = test_lm,
-                              cause = 1)
-            
-            brier_death <- pec(rsf_model, formula = model_formula, data = test_lm,
-                               cause = 2)
-            
-            error_temp <- unname(apply(rsf_prediction$err.rate, 2, mean, na.rm = TRUE))
-            
-            performance_temp <- data.table(LM = lmx,
-                                           N = rsf_prediction$n,
-                                           error_eskd = 100 * error_temp[1],
-                                           error_death = 100 * error_temp[2],
-                                           brier_eskd = crps(brier_eskd)[2],
-                                           brier_death = crps(brier_death)[2])
-            
-            model_performance <- rbind(model_performance, performance_temp)
-        }
-        
-        model_performance$fold <- fold
-        model_performance$method <- method
-        cv_performance <- rbind(cv_performance, model_performance)
-    }
-}
+main_sens_dt <- main_sens_dt %>% 
+    unite(method, file_name, sep = "_", col = "dt_path")
 
-write_rds(cv_performance, "main_vs_sens_performance.rds")
+main_sens_dt <- main_sens_dt %>% 
+    mutate(dt = map(dt_path, prepare_dt))
+
+main_sens_dt <- main_sens_dt %>% 
+    mutate(folds = map(dt, create_folds, seed)) %>% 
+    unnest_longer(folds)
+
+main_sens_dt <- main_sens_dt %>% 
+    select(folds) %>% 
+    map(~.x) %>% 
+    bind_rows() %>% 
+    bind_cols(main_sens_dt) %>% 
+    select(id, base_cov, longi_cov, dt, splits) %>% 
+    mutate(id_name = rep(c("main", "sens"), each = 5)) %>% 
+    mutate(id = str_to_lower(id))
+
+main_sens_dt <- main_sens_dt %>% 
+    mutate(train_dt = pmap(list(dt, splits), extract_train_dt),
+           test_dt = pmap(list(dt, splits), extract_test_dt)) %>% 
+    select(id_name, id, base_cov, longi_cov, train_dt, test_dt)
+
+main_sens_dt <- main_sens_dt %>% 
+    mutate(performance = future_pmap(list(train_dt, test_dt, longi_cov, base_cov), 
+                                     cross_val_performance_locf_map, landmark,
+                                     predict_horizon))
+
+write_rds(main_sens_dt, "main_vs_sens_performance.rds")
 
 # visualisation -----------------------------------------------------------
 
+cv_performance <- main_sens_dt %>% 
+    unnest(performance) %>% 
+    select(id_name, LM:brier_death)
+
 error1 <- cv_performance %>% 
-    select(-(brier_eskd:fold)) %>% 
+    filter(id_name == "main") %>% 
+    select(-(contains("brier")))
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 
     filter(method == "main") %>% 
@@ -197,7 +86,8 @@ error1 <- cv_performance %>%
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) 
 
 error2 <- cv_performance %>% 
-    select(-(brier_eskd:fold)) %>% 
+    filter(id_name == "sens") %>% 
+    select(-(contains("brier")))
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>%
     filter(method == "sens") %>% 
@@ -219,7 +109,8 @@ error1 + error2 + plot_annotation(
 )
 
 brier1 <- cv_performance %>% 
-    select(-(error_eskd:error_death), -fold) %>% 
+    filter(id_name == "main") %>% 
+    select(-(contains("error"))) %>% 
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 
     filter(method == "main") %>% 
@@ -237,7 +128,8 @@ brier1 <- cv_performance %>%
     scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
 
 brier2 <- cv_performance %>% 
-    select(-(error_eskd:error_death), -fold) %>% 
+    filter(id_name == "sens") %>% 
+    select(-(contains("error"))) %>% 
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 
     filter(method == "sens") %>% 
@@ -259,7 +151,3 @@ brier1 + brier2 + plot_annotation(
 )
 
 # end ---------------------------------------------------------------------
-
-
-
-

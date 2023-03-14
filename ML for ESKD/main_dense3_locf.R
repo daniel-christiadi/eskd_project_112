@@ -24,17 +24,17 @@ longi_cov_top6 <- c("albumin", "bicarb", "chloride", "egfr", "haemoglobin",
                     "sodium") 
 
 longi_cov_top5 <- c("albumin", "bicarb", "chloride", "egfr", "haemoglobin")
-base_cov <- c("age_init")
+base_cov_full <- c("sex", "age_init", "gn_fct")
+base_cov_reduced <- c("age_init")
 
 source("utility_functions.R")
 
-
-# dense3_exploration ------------------------------------------------------
+# dense3 locf exploration -------------------------------------------------
 
 dense3_dt <- tibble(
     dt_path = "main_dense3_dt.rds",
-    base_cov = list(base_cov, base_cov, base_cov),
-    longi_cov = list(longi_cov_top10, longi_cov_top6, longi_cov_top5),
+    base_cov = list(base_cov_reduced, base_cov_reduced, base_cov_reduced),
+    longi_cov = list(longi_cov_top10, longi_cov_top6, longi_cov_top5)
 )
 
 dense3_dt <- dense3_dt %>% 
@@ -236,4 +236,24 @@ brier4 <- dense3_exploration_performance %>%
 brier1 + brier2 + brier3 + brier4 + plot_annotation(
     title = "Comparison Dense3 LOCF Models"
 ) + plot_layout(ncol = 2, guides = "collect")
+
+
+# trained models ----------------------------------------------------------
+
+trained_models <- tibble(
+    dt_path = "main_dense3_dt.rds",
+    base_cov = list(base_cov_full, base_cov_reduced),
+    longi_cov = list(longi_cov_full, longi_cov_top5),
+    model_name = c("full", "top5")
+)
+
+trained_models <- trained_models %>% 
+    mutate(dt = map(dt_path, prepare_dt))
+
+trained_models %>% 
+    select(dt, longi_cov, base_cov, model_name) %>% 
+    future_pwalk(final_models, landmark, predict_horizon)
+
+# end ---------------------------------------------------------------------
+
 

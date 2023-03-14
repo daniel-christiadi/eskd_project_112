@@ -1,3 +1,5 @@
+# setup -------------------------------------------------------------------
+
 libraries <- c('readxl', 'tidyverse', 'janitor', 'skimr', 'heatmaply', 
                'data.table', 'lubridate')
 installed <- installed.packages()[,'Package']
@@ -7,7 +9,7 @@ if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
 lib.ok <- sapply(libraries, require, character.only=TRUE)
 approach <- "main" # "sens" for sensitivity analysis
 extraction_date <<- as_datetime("2022-01-14")
-heatmap_breaks<-c(0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)
+heatmap_breaks <- c(0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)
 source("utility_functions.R")
 
 # text data1 --------------------------------------------------------------
@@ -1509,11 +1511,3 @@ file_name <- str_c(approach, "acr3_dt.rds", sep = "_")
 write_rds(acr3_dt, file_name)
 
 # end ---------------------------------------------------------------------
-
-
-
-
-
-
-
-

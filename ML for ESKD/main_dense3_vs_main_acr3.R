@@ -1,6 +1,6 @@
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
                "dynpred", "prodlim", "mice", "randomForestSRC", "pec", 
-               "patchwork", "purrr")
+               "patchwork", "future", "furrr")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -26,32 +26,51 @@ base_cov <- c("sex", "age_init", "gn_fct")
 # dense3 vs acr3 performance ----------------------------------------------
 
 main_dt <- tibble(
-    dataset = c("main_dense3_dt.rds", "main_acr3_dt.rds"),
+    dt_path = c("main_dense3_dt.rds", "main_acr3_dt.rds"),
     base_cov = list(base_cov, base_cov),
     longi_cov = list(longi_cov, longi_cov_acr)
 )
 
 main_dt <- main_dt %>% 
-    mutate(locf_perf = pmap(list(dataset, longi_cov, base_cov), cross_val_performance_locf))
+    mutate(dt = map(dt_path, prepare_dt),
+           folds = map(dt, create_folds, seed)) %>% 
+    unnest_longer(folds)
 
 main_dt <- main_dt %>% 
-    mutate(lme_perf = pmap(list(dataset, longi_cov, base_cov), cross_val_performance_lme))
+    select(folds) %>% 
+    map(~.x) %>% 
+    bind_rows() %>% 
+    bind_cols(main_dt) %>% 
+    select(id, base_cov, longi_cov, dt, splits) %>% 
+    mutate(id = str_to_lower(id), 
+           id_name = rep(c("dense3", "acr3"), each = 5)) %>% 
+    relocate(id_name, .before = id)
 
 main_dt <- main_dt %>% 
-    mutate(lmepoly_perf = pmap(list(dataset, longi_cov, base_cov), cross_val_performance_lmepoly))
+    mutate(train_dt = pmap(list(dt, splits), extract_train_dt),
+           test_dt = pmap(list(dt, splits), extract_test_dt)) %>% 
+    select(id_name, id, base_cov, longi_cov, train_dt, test_dt)
 
-# write_rds(main_dt, "main_dense3_vs_acr3_performance.rds")
+main_dt <- main_dt %>% 
+    mutate(performance = future_pmap(list(train_dt, test_dt, longi_cov, base_cov), 
+                                     cross_val_performance_locf_map, landmark,
+                                     predict_horizon))
+
+main_dt <- main_dt %>% 
+    mutate(performance = future_pmap(list(train_dt, test_dt, longi_cov, base_cov), 
+                                     cross_val_performance_lme_map, landmark,
+                                     predict_horizon))
+
+main_dt <- main_dt %>% 
+    mutate(performance = future_pmap(list(train_dt, test_dt, longi_cov, base_cov), 
+                                     cross_val_performance_lmepoly_map, landmark,
+                                     predict_horizon))
+
+write_rds(main_dt, "main_dense3_vs_acr3_performance.rds")
 
 # dense3 vs acr3 LOCF visualisation --------------------------------------------
 
 main_dt <- read_rds("main_dense3_vs_acr3_performance.rds")
-
-# main_dt %>% 
-#     select(locf_perf) %>% 
-#     unnest_longer(locf_perf) %>% 
-#     map(~ .x)
-#     bind_rows()
-#     
 
 locf_performance <- main_dt %>% 
     select(locf_perf) %>% 
@@ -250,5 +269,3 @@ brier1 + brier2 + brier3 + plot_annotation(
 )
 
 # end ---------------------------------------------------------------------
-
-
