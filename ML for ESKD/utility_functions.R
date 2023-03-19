@@ -84,6 +84,31 @@ prepare_dt <- function(dt_path){
     dt
 }
 
+prepare_dt_for_dynamic_plot <- function(dt){
+    dt <- as.data.table(dt)
+    
+    dt <- dt %>% 
+        pivot_wider(names_from = test, 
+                    values_from = value)
+    
+    dt <- dt %>% 
+        mutate(status_compete = replace(status_compete, 
+                                        status_compete == "no", "censored")) %>% 
+        mutate(status_compete_num = case_when(
+            status_compete == "censored" ~ 0,
+            status_compete == "eskd" ~ 1,
+            .default = 2
+        )) %>% 
+        relocate(status_compete_num, .after = status_compete) %>% 
+        mutate(sex = factor(sex, levels = c("Female", "Male")),
+               gn_fct = if_else(is.na(gn_cat), "no", "yes")) %>% 
+        relocate(gn_fct, .after = gn_cat) %>% 
+        mutate(gn_fct = factor(gn_fct, levels = c("no", "yes"))) %>% 
+        as.data.table()
+    
+    dt
+}
+
 create_folds <- function(dt, seed){
     set.seed(seed)
     
@@ -112,6 +137,20 @@ extract_test_dt <- function(dt, folds_splits){
         filter(id %in% temp_id)
     
     test_dt
+}
+
+extract_landmark <- function(prepared_dt, ...){
+    max_test_time <- prepared_dt %>% 
+        slice_max(relyear) %>% 
+        mutate(relyear = plyr::round_any(relyear, 0.5, f = floor)) %>% 
+        pull(relyear)
+    
+    if(max_test_time > max(landmark)){
+        landmark <- seq(from = min(landmark), to = max(landmark), by = 0.5)
+    } else {
+        landmark <- seq(from = min(landmark), to = max_test_time, 0.5)
+    }
+    landmark
 }
 
 extract_landmark_dt <- function(dt, base_cov, longi_cov, landmark, ...){
@@ -718,7 +757,8 @@ final_models <- function(dt, longi_cov, base_cov, model_name, ...){
         
         rsf_model <- rfsrc(formula = model_formula, data = dt_lm, ntree = 1000,
                            splitrule = "logrankCR", importance = FALSE, statistics = FALSE,
-                           mtry = tune_rsf$optimal[[2]], nodesize = tune_rsf$optimal[[1]])
+                           mtry = tune_rsf$optimal[[2]], nodesize = tune_rsf$optimal[[1]], 
+                           save.memory = FALSE)
         
         rsf_model_name <- str_c(model_name, lmx, "locf_models.gz", sep = "_")
         saveRDS(rsf_model, file = rsf_model_name, compress = TRUE)
@@ -730,6 +770,73 @@ final_models <- function(dt, longi_cov, base_cov, model_name, ...){
     )    
     tune_tibble_name <- str_c(model_name, "locf_tune.rds", sep = "_")
     write_rds(output_tibble, file = tune_tibble_name)
+}
+
+predicted_cif <- function(landmark_dt, landmark, base_cov, longi_cov,
+                          analysis_models, ...){
+    
+    model_name <- str_c(analysis_models, landmark, "locf_models.gz", sep = "_")
+    rsf_model <- readRDS(model_name)
+    
+    rsf_prediction <- predict.rfsrc(object = rsf_model,
+                                    newdata = landmark_dt, na.action = "na.impute")
+    
+    column_cif <- sindex(jump.times = rsf_prediction$time.interest,
+                         eval.times = seq(landmark, 
+                                          landmark + predict_horizon, 
+                                          0.25))
+    
+    column_cif[1] <- 1
+    
+    cif_dt <- data.table(
+        pred_relyear = seq(landmark, landmark + predict_horizon, 0.25),
+        eskd_cif = rsf_prediction$cif[, column_cif, "CIF.1"],
+        death_cif = rsf_prediction$cif[, column_cif, "CIF.2"]
+    )
+    cif_dt
+}
+
+
+summarise_pts_info <- function(dt, base_cov, longi_cov){
+    base_cov <- base_cov %>% 
+        pluck(1)
+    
+    longi_cov <- longi_cov %>% 
+        pluck(1)
+    
+    dt %>%
+        pluck(1) %>% 
+        select(relyear, !!base_cov, time_compete:status_compete, all_of(longi_cov)) %>%
+        rename("Intial_age" = age_init,
+               "Test_time" = relyear,
+               "Event_time" = time_compete,
+               "Status" = status_compete) %>%
+        gt() %>%
+        tab_header(title = md("**Example Patient**")) %>%
+        tab_spanner(label = "Pathology Test",
+                    columns = !!longi_cov)
+}
+predicted_cif_model_loaded <- function(landmark_dt, landmark, base_cov, 
+                                       longi_cov, ...){
+    # need to all load model first as a list into model  
+    index <- match(landmark, landmark)
+    
+    rsf_prediction <- predict.rfsrc(object = model[[index]],
+                                    newdata = landmark_dt, na.action = "na.impute")
+    
+    column_cif <- sindex(jump.times = rsf_prediction$time.interest,
+                         eval.times = seq(landmark, 
+                                          landmark + predict_horizon, 
+                                          0.25))
+    
+    column_cif[1] <- 1
+    
+    cif_dt <- data.table(
+        pred_relyear = seq(landmark, landmark + predict_horizon, 0.25),
+        eskd_cif = rsf_prediction$cif[, column_cif, "CIF.1"],
+        death_cif = rsf_prediction$cif[, column_cif, "CIF.2"]
+    )
+    cif_dt
 }
 
 extract_cif_feature <- function(outcome_dt, train_test_dt, outcome){

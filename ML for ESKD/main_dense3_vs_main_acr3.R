@@ -1,6 +1,6 @@
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
                "dynpred", "prodlim", "mice", "randomForestSRC", "pec", 
-               "patchwork", "future", "furrr")
+               "patchwork", "purrr")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -52,17 +52,17 @@ main_dt <- main_dt %>%
     select(id_name, id, base_cov, longi_cov, train_dt, test_dt)
 
 main_dt <- main_dt %>% 
-    mutate(performance = future_pmap(list(train_dt, test_dt, longi_cov, base_cov), 
+    mutate(locf_perf = pmap(list(train_dt, test_dt, longi_cov, base_cov), 
                                      cross_val_performance_locf_map, landmark,
                                      predict_horizon))
 
 main_dt <- main_dt %>% 
-    mutate(performance = future_pmap(list(train_dt, test_dt, longi_cov, base_cov), 
+    mutate(lme_perf = pmap(list(train_dt, test_dt, longi_cov, base_cov), 
                                      cross_val_performance_lme_map, landmark,
                                      predict_horizon))
 
 main_dt <- main_dt %>% 
-    mutate(performance = future_pmap(list(train_dt, test_dt, longi_cov, base_cov), 
+    mutate(lmepoly_perf = pmap(list(train_dt, test_dt, longi_cov, base_cov), 
                                      cross_val_performance_lmepoly_map, landmark,
                                      predict_horizon))
 
@@ -71,6 +71,12 @@ write_rds(main_dt, "main_dense3_vs_acr3_performance.rds")
 # dense3 vs acr3 LOCF visualisation --------------------------------------------
 
 main_dt <- read_rds("main_dense3_vs_acr3_performance.rds")
+
+main_dt %>% 
+    filter(id_name == "dense3") %>% 
+    select(locf_perf) %>% 
+    unnest_longer(locf_perf) %>% 
+    
 
 locf_performance <- main_dt %>% 
     select(locf_perf) %>% 

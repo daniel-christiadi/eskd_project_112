@@ -21,7 +21,7 @@ base_cov_full <- c("sex", "age_init", "gn_fct")
 longi_cov_top5 <- c("albumin", "bicarb", "chloride", "egfr", "haemoglobin")
 base_cov_reduced <- c("age_init")
 
-external_data_file_name <- "wa_data.rds" #please input file name here!
+external_data_file_name <- "experiment_test.rds" #please input file name here!
 analysis_models <- c("full", "top5")
 source("utility_functions.R")
 

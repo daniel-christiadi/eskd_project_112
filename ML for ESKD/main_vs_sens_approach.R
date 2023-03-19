@@ -1,6 +1,8 @@
+# setup -------------------------------------------------------------------
+
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
                "dynpred", "prodlim", "mice", "randomForestSRC", "pec", 
-               "gtsummary", "patchwork", "future", "furrr")
+               "gtsummary", "patchwork", "purrr")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -30,7 +32,7 @@ main_sens_dt <- tibble(
 )
 
 main_sens_dt <- main_sens_dt %>% 
-    unite(method, file_name, sep = "_", col = "dt_path")
+    unite(method, file_name, sep = "_", col = "dt_path", remove = FALSE)
 
 main_sens_dt <- main_sens_dt %>% 
     mutate(dt = map(dt_path, prepare_dt))
@@ -44,17 +46,16 @@ main_sens_dt <- main_sens_dt %>%
     map(~.x) %>% 
     bind_rows() %>% 
     bind_cols(main_sens_dt) %>% 
-    select(id, base_cov, longi_cov, dt, splits) %>% 
-    mutate(id_name = rep(c("main", "sens"), each = 5)) %>% 
-    mutate(id = str_to_lower(id))
+    mutate(id = str_to_lower(id)) %>% 
+    select(method, id, base_cov, longi_cov, dt, splits)
 
 main_sens_dt <- main_sens_dt %>% 
     mutate(train_dt = pmap(list(dt, splits), extract_train_dt),
            test_dt = pmap(list(dt, splits), extract_test_dt)) %>% 
-    select(id_name, id, base_cov, longi_cov, train_dt, test_dt)
+    select(method, id, base_cov, longi_cov, train_dt, test_dt)
 
 main_sens_dt <- main_sens_dt %>% 
-    mutate(performance = future_pmap(list(train_dt, test_dt, longi_cov, base_cov), 
+    mutate(locf_perf = pmap(list(train_dt, test_dt, longi_cov, base_cov), 
                                      cross_val_performance_locf_map, landmark,
                                      predict_horizon))
 
@@ -63,12 +64,12 @@ write_rds(main_sens_dt, "main_vs_sens_performance.rds")
 # visualisation -----------------------------------------------------------
 
 cv_performance <- main_sens_dt %>% 
-    unnest(performance) %>% 
-    select(id_name, LM:brier_death)
+    unnest(locf_perf) %>% 
+    select(method, LM:brier_death)
 
 error1 <- cv_performance %>% 
-    filter(id_name == "main") %>% 
-    select(-(contains("brier")))
+    filter(method == "main") %>% 
+    select(-(contains("brier"))) %>% 
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 
     filter(method == "main") %>% 
@@ -86,8 +87,8 @@ error1 <- cv_performance %>%
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) 
 
 error2 <- cv_performance %>% 
-    filter(id_name == "sens") %>% 
-    select(-(contains("brier")))
+    filter(method == "sens") %>% 
+    select(-(contains("brier"))) %>% 
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>%
     filter(method == "sens") %>% 
@@ -109,7 +110,7 @@ error1 + error2 + plot_annotation(
 )
 
 brier1 <- cv_performance %>% 
-    filter(id_name == "main") %>% 
+    filter(method == "main") %>% 
     select(-(contains("error"))) %>% 
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 
@@ -128,7 +129,7 @@ brier1 <- cv_performance %>%
     scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
 
 brier2 <- cv_performance %>% 
-    filter(id_name == "sens") %>% 
+    filter(method == "sens") %>% 
     select(-(contains("error"))) %>% 
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 

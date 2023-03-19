@@ -2,13 +2,12 @@
 
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
                "dynpred", "prodlim", "randomForestSRC", "pec", 
-               "gtsummary", "future", "furrr", "patchwork")
+               "gtsummary","purrr", "patchwork", "gt")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
                                       dependencies=TRUE)
 lib.ok <- sapply(libraries, require, character.only=TRUE)
-
 cross_val <- 5
 seed <- 7
 predict_horizon <- 5
@@ -24,7 +23,6 @@ base_cov_reduced <- c("age_init")
 experiment_fold <- "fold1"
 
 source("utility_functions.R")
-
 
 # model -------------------------------------------------------------------
 
@@ -53,101 +51,78 @@ experiment_dt <- experiment_dt %>%
            test_dt = pmap(list(dt, splits), extract_test_dt)) %>% 
     select(id_name:longi_cov, train_dt, test_dt)
 
-future_pwalk(list(experiment_dt$train_dt, experiment_dt$longi_cov, 
+pwalk(list(experiment_dt$train_dt, experiment_dt$longi_cov, 
                   experiment_dt$base_cov, experiment_dt$id_name),
                  final_models, landmark, predict_horizon)
 
 # write_rds(experiment_dt$test_dt[[1]], "experiment_test.rds")
+external_data_file_name <- "experiment_test.rds"
+analysis_models <- c("experiment_full", "experiment_top5")
 
+external_dt <- tibble(
+    dt_path = rep(external_data_file_name, times = 2),
+    base_cov = list(base_cov_full, base_cov_reduced),
+    longi_cov = list(longi_cov_full, longi_cov_top5),
+    analysis_models = analysis_models
+)
+
+external_dt <- external_dt %>% 
+    mutate(dt = map(dt_path, prepare_dt))
+
+external_dt <- external_dt %>% 
+    mutate(landmark = list(landmark)) %>% 
+    unnest(landmark) %>% 
+    select(dt, base_cov, longi_cov, landmark, analysis_models)
+
+external_dt <- external_dt %>% 
+    mutate(lmx_dt = pmap(list(dt, base_cov, longi_cov, landmark), 
+                         extract_landmark_dt, predict_horizon))
+
+external_dt <- external_dt %>% 
+    mutate(performance = pmap(list(lmx_dt, landmark, base_cov, longi_cov, analysis_models), 
+                              performance_landmark_dt))
 
 # test cif ----------------------------------------------------------------
 
-experiment_top5_model <- vector("list", length = length(landmark))
+dt <- read_rds("experiment_test.rds")
 
-model_name <- "experiment_top5"
+random_test_id <- dt %>% 
+    distinct(id, .keep_all = TRUE) %>% 
+    slice_sample(n = 1,) %>% 
+    pull(id)
 
-# i <- 1
+random_test_dt <- tibble(dt = list(filter(dt, id == random_test_id)),
+                         base_cov = list(base_cov_reduced),
+                         longi_cov = list(longi_cov_top5),
+                         analysis_name = c("experiment_top5"))
 
-for (i in seq_along(landmark)){
-    file_name <- str_c(model_name, landmark[i], "locf_models.gz", 
-                       sep = "_")
-    # file_name <- str_c(c("top5", "model", landmark[i], "landmark_5.gz"), 
-    #                    collapse = "_")
-    # file_name <- str_c(c("top5", "model", landmark[i], "landmark_2.gz"), 
-    #                    collapse = "_")
-    print(file_name)
-    experiment_top5_model[[i]] <- readRDS(file = file_name)
-    # model_2y[[i]] <- readRDS(file = file_name)
-} 
-    
-test_dt <- experiment_dt$test_dt[[1]]
+random_test_dt <- random_test_dt %>% 
+    mutate(dt = map(dt, prepare_dt_for_dynamic_plot)) %>% 
+    mutate(landmark = map(dt, extract_landmark, landmark)) %>% 
+    unnest_longer(landmark) %>% 
+    mutate(lmx_dt = pmap(list(dt, base_cov, longi_cov, landmark), 
+                         extract_landmark_dt, predict_horizon)) %>% 
+    mutate(pred_cif = pmap(list(lmx_dt, landmark, base_cov, longi_cov, 
+                                analysis_name), predicted_cif, predict_horizon))
 
-test_dt <- test_dt %>% 
-    select(id, !!base_cov_reduced, relyear, !!longi_cov_top5, 
-           time_compete:status_compete_num) %>% 
-    group_by(id) %>% 
-    fill(!!longi_cov_top5) %>% 
-    ungroup() %>% 
-    as.data.table()
+random_test_dt %>% 
+    select(pred_cif) %>% 
+    unnest_longer(pred_cif) %>% 
+    map(~ .x) %>% 
+    bind_rows() %>% 
+    group_by(pred_relyear) %>% 
+    summarise(mean_eskd_cif = mean(eskd_cif),
+              mean_death_cif = mean(death_cif)) %>% View()
 
-lmx_test_dt <- NULL
+summarise_pts_info(test_dt$dt, 
+                   base_cov = test_dt$base_cov,
+                   longi_cov = test_dt$longi_cov)
 
-for (i in seq_along(landmark)) {
-    temp <- cutLM(data = test_dt, outcome = list(time = "time_compete",
-                                                 status = "status_compete_num"),
-                  LM = landmark[i], horizon = landmark[i] + predict_horizon,
-                  covs = list(fixed = base_cov_reduced, varying = longi_cov_top5),
-                  format = "long", id = "id", rtime = "relyear", 
-                  right = FALSE) 
-    lmx_test_dt <- rbind(lmx_test_dt, temp)
-}
+# dynamic plot ------------------------------------------------------------
 
-lmx_test_dt <- lmx_test_dt %>% 
-    arrange(id, LM)
 
-lmx_test_dt <- lmx_test_dt %>% 
-    select(-(time_compete:status_compete_num))
 
-super_eskd_cif <- NULL
-super_death_cif <- NULL
 
-index <- 1
-for (index in seq_along(landmark)){
-    temp  <- lmx_test_dt %>% 
-        filter(LM == landmark[index])
-    
-    # rsf_prediction <- predict.rfsrc(object = model_2y[[index]],
-    #                                 newdata = temp, na.action = "na.impute")
-    
-    rsf_prediction <- predict.rfsrc(object = experiment_top5_model[[index]],
-                                    newdata = temp, na.action = "na.impute")
-    
-    column_cif <- sindex(jump.times = rsf_prediction$time.interest,
-                         eval.times = seq(landmark[index], 
-                                          landmark[index] + predict_horizon, 
-                                          0.25))
-    
-    column_cif[1] <- 1
-    eskd_cif <- data.table(id = temp$id)
-    
-    eskd_cif[, c(as.character(seq(landmark[index], landmark[index] + predict_horizon, 0.25))) := as.data.table(rsf_prediction$cif[, column_cif, "CIF.1"])]
-    
-    eskd_cif <- melt(eskd_cif, id.vars = c("id"), 
-                     variable.name = "relyear",
-                     value.name = "cif")
-    
-    super_eskd_cif <- rbind(super_eskd_cif, eskd_cif)
-    
-    death_cif <- data.table(id = temp$id)
-    
-    death_cif[, c(as.character(seq(landmark[index], landmark[index] + predict_horizon, 0.25))) := as.data.table(rsf_prediction$cif[, column_cif, "CIF.2"])]
-    
-    death_cif <- melt(death_cif, id.vars = c("id"), 
-                      variable.name = "relyear",
-                      value.name = "cif")
-    
-    super_death_cif <- rbind(super_death_cif, death_cif)
-}
 
 
 
