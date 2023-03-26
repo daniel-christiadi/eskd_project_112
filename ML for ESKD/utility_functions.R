@@ -64,7 +64,8 @@ prepare_dt <- function(dt_path){
     
     dt <- dt %>% 
         pivot_wider(names_from = test, 
-                    values_from = value)
+                    values_from = value, 
+                    values_fn = mean)
     
     dt <- dt %>% 
         mutate(status_compete = replace(status_compete, 
@@ -179,9 +180,10 @@ performance_landmark_dt <- function(landmark_dt, landmark, base_cov,
     model_formula <- as.formula(str_c("Surv(time_compete, status_compete_num)",
                                       str_c(c(base_cov, longi_cov), collapse = " + "), 
                                       sep = "~"))
-    
+    current_dir <- getwd()
     model_name <- str_c(analysis_models, landmark, "locf_models.gz", sep = "_")
-    rsf_model <- readRDS(model_name)
+    model_path <- file.path(current_dir, model_name)
+    rsf_model <- readRDS(model_path)
     
     rsf_prediction <- predict.rfsrc(object = rsf_model,
                                     newdata = landmark_dt, na.action = "na.omit")
@@ -772,6 +774,26 @@ final_models <- function(dt, longi_cov, base_cov, model_name, ...){
     write_rds(output_tibble, file = tune_tibble_name)
 }
 
+summarise_pts_info <- function(dt, base_cov, longi_cov){
+    base_cov <- base_cov %>% 
+        pluck(1)
+    
+    longi_cov <- longi_cov %>% 
+        pluck(1)
+    
+    dt %>%
+        pluck(1) %>% 
+        select(relyear, !!base_cov, time_compete:status_compete, all_of(longi_cov)) %>%
+        rename("Intial_age" = age_init,
+               "Test_time" = relyear,
+               "Event_time" = time_compete,
+               "Status" = status_compete) %>%
+        gt() %>%
+        tab_header(title = md("**Example Patient**")) %>%
+        tab_spanner(label = "Pathology Test",
+                    columns = !!longi_cov)
+}
+
 predicted_cif <- function(landmark_dt, landmark, base_cov, longi_cov,
                           analysis_models, ...){
     
@@ -797,25 +819,8 @@ predicted_cif <- function(landmark_dt, landmark, base_cov, longi_cov,
 }
 
 
-summarise_pts_info <- function(dt, base_cov, longi_cov){
-    base_cov <- base_cov %>% 
-        pluck(1)
-    
-    longi_cov <- longi_cov %>% 
-        pluck(1)
-    
-    dt %>%
-        pluck(1) %>% 
-        select(relyear, !!base_cov, time_compete:status_compete, all_of(longi_cov)) %>%
-        rename("Intial_age" = age_init,
-               "Test_time" = relyear,
-               "Event_time" = time_compete,
-               "Status" = status_compete) %>%
-        gt() %>%
-        tab_header(title = md("**Example Patient**")) %>%
-        tab_spanner(label = "Pathology Test",
-                    columns = !!longi_cov)
-}
+
+
 predicted_cif_model_loaded <- function(landmark_dt, landmark, base_cov, 
                                        longi_cov, ...){
     # need to all load model first as a list into model  
