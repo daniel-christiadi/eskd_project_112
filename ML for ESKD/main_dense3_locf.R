@@ -66,16 +66,21 @@ write_rds(dense3_dt, "main_dense3_locf_exploration_performance.rds")
 # visualisation -----------------------------------------------------------
 
 main_dt <- read_rds("main_dense3_vs_acr3_performance.rds")
+dense3_dt <- read_rds("main_dense3_locf_exploration_performance.rds")
 
-main_dt <- main_dt %>% 
-    select(locf_perf) %>% 
+locf_perf <- main_dt %>% 
     unnest_longer(locf_perf) %>% 
-    map(~ .x) %>% 
-    bind_rows() %>% 
-    filter(analysis == "main_dense3_dt_locf") %>% 
-    select(-(fold:analysis))
+    select(locf_perf) %>% 
+    map(~.x) %>% 
+    bind_rows() 
 
-error1 <- main_dt %>% 
+dense3_acr3_locf_performance <- main_dt %>% 
+    unnest_longer(locf_perf) %>% 
+    select(id_name) %>% 
+    bind_cols(locf_perf)
+
+error1 <- dense3_acr3_locf_performance %>% 
+    filter(id_name == "dense3") %>% 
     select(-(contains("brier"))) %>% 
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 
@@ -85,19 +90,26 @@ error1 <- main_dt %>%
                           labels = c("ESKD", "Death"))) %>% 
     ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
     facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 All Error Rate (1 - Harrell's C-index) per Landmark 
-         with LOCF Prediction Horizon 5 years", 
+    labs(title = "Dense3 Error Rate (1 - Harrell's C-index) per Landmark with LOCF 
+         Prediction Horizon 5 years", 
          y = "Error Rate (%)") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
                        legend.title = element_blank(),
                        legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) 
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
 
-dense3_exploration_performance <- dense3_dt %>% 
-    unnest(performance) %>% 
-    select(id_name, LM:brier_death)
+dense3_locf_perf <- dense3_dt %>% 
+    select(performance) %>% 
+    unnest_longer(performance) %>% 
+    map(~ .x) %>% 
+    bind_rows()
 
-error2 <- dense3_exploration_performance %>% 
+dense3_locf_perf <- dense3_dt %>% 
+    unnest_longer(performance) %>% 
+    select(id_name) %>% 
+    bind_cols(dense3_locf_perf)
+ 
+error2 <- dense3_locf_perf %>% 
     filter(id_name == "top10") %>% 
     select(-(contains("brier"))) %>% 
     arrange(LM) %>% 
@@ -116,7 +128,7 @@ error2 <- dense3_exploration_performance %>%
                        legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) 
 
-error3 <- dense3_exploration_performance %>% 
+error3 <- dense3_locf_perf %>% 
     filter(id_name == "top6") %>% 
     select(-(contains("brier"))) %>% 
     arrange(LM) %>% 
@@ -135,7 +147,7 @@ error3 <- dense3_exploration_performance %>%
                        legend.position = "none") + 
     scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))  
 
-error4 <- dense3_exploration_performance %>% 
+error4 <- dense3_locf_perf %>% 
     filter(id_name == "top5") %>% 
     select(-(contains("brier"))) %>% 
     arrange(LM) %>% 
@@ -158,7 +170,9 @@ error1 + error2 + error3 + error4 + plot_annotation(
     title = "Comparison Dense3 LOCF Models"
 ) + plot_layout(ncol = 2, guides = "collect")
 
-brier1 <- main_dt %>% 
+
+brier1 <- dense3_acr3_locf_performance %>% 
+    filter(id_name == "dense3") %>% 
     select(-(contains("error"))) %>% 
     arrange(LM) %>% 
     mutate(LM = as_factor(LM)) %>% 
@@ -168,7 +182,7 @@ brier1 <- main_dt %>%
                           labels = c("ESKD", "Death"))) %>%    
     ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
     facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 All Integrated Brier Score per Landmark with LOCF 
+    labs(title = "Dense3 Integrated Brier Score per Landmark with LOCF 
          Prediction Horizon 5 years",
          y = "Brier Score") + 
     theme_bw() + theme(axis.title.x = element_blank(), 
@@ -176,7 +190,7 @@ brier1 <- main_dt %>%
                        legend.position = "none") +
     scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
 
-brier2 <- dense3_exploration_performance %>% 
+brier2 <- dense3_locf_perf %>% 
     filter(id_name == "top10") %>% 
     select(-(contains("error"))) %>% 
     arrange(LM) %>% 
@@ -195,7 +209,7 @@ brier2 <- dense3_exploration_performance %>%
                        legend.position = "none") +
     scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
 
-brier3 <- dense3_exploration_performance %>% 
+brier3 <- dense3_locf_perf %>% 
     filter(id_name == "top6") %>% 
     select(-(contains("error"))) %>% 
     arrange(LM) %>% 
@@ -214,7 +228,7 @@ brier3 <- dense3_exploration_performance %>%
                        legend.position = "none") +
     scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
 
-brier4 <- dense3_exploration_performance %>% 
+brier4 <- dense3_locf_perf %>% 
     filter(id_name == "top5") %>% 
     select(-(contains("error"))) %>% 
     arrange(LM) %>% 
@@ -253,6 +267,64 @@ trained_models <- trained_models %>%
 trained_models %>% 
     select(dt, longi_cov, base_cov, model_name) %>% 
     future_pwalk(final_models, landmark, predict_horizon)
+
+# external data -----------------------------------------------------------
+
+external_performance <- read_rds("external_performance.rds")
+
+external_locf <- external_performance %>% 
+    select(performance) %>% 
+    unnest_longer(performance) %>% 
+    map(~ .x) %>% 
+    bind_rows()
+
+external_locf <- external_locf %>% 
+    select(-error_eskd) %>% 
+    rename(error_eskd = error_death)
+
+external_locf <- external_performance %>% 
+    unnest_longer(performance) %>% 
+    select(analysis_models) %>% 
+    bind_cols(external_locf) %>% 
+    arrange(LM, analysis_models)
+
+error1_external
+
+error1_external <- external_locf %>% 
+    filter(analysis_models == "full") %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("error_eskd"), names_to = "error") %>% 
+    mutate(error = factor(error, levels = c("error_eskd"),
+                          labels = c("ESKD"))) %>% 
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue")) + 
+    labs(title = "External Error Rate (1 - Harrell's C-index) per Landmark with LOCF 
+         Prediction Horizon 5 years", 
+         y = "Error Rate (%)") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+error4_external <- external_locf %>% 
+    filter(analysis_models == "top5") %>% 
+    mutate(LM = as_factor(LM)) %>% 
+    pivot_longer(cols = c("error_eskd"), names_to = "error") %>% 
+    mutate(error = factor(error, levels = c("error_eskd"),
+                          labels = c("ESKD"))) %>% 
+    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
+    facet_grid(~ LM) + scale_fill_manual(values = c("blue")) + 
+    labs(title = "External Top 5 Error Rate (1 - Harrell's C-index) per Landmark 
+         with LOCF Prediction Horizon 5 years", 
+         y = "Error Rate (%)") + 
+    theme_bw() + theme(axis.title.x = element_blank(), 
+                       legend.title = element_blank(),
+                       legend.position = "none") + 
+    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+
+error1 + error1_external + error4 + error4_external + plot_annotation(
+    title = "Comparison Internal vs External LOCF Models"
+) + plot_layout(ncol = 2, guides = "collect")
 
 # end ---------------------------------------------------------------------
 
