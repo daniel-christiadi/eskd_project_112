@@ -21,3 +21,9 @@ ML for ESKD/*.html
 ML for ESKD/*.txt
 
 ml_eskd_new/*
+old_data/
+script/
+.ipynb_checkpoints/
+.vscode/
+
+preparing_paper.R

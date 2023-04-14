@@ -327,5 +327,3 @@ error1 + error1_external + error4 + error4_external + plot_annotation(
 ) + plot_layout(ncol = 2, guides = "collect")
 
 # end ---------------------------------------------------------------------
-
-
