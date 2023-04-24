@@ -63,92 +63,56 @@ write_rds(main_sens_dt, "main_vs_sens_performance.rds")
 
 # visualisation -----------------------------------------------------------
 
+main_sens_dt <- read_rds("main_vs_sens_performance.rds")
+
 cv_performance <- main_sens_dt %>% 
     unnest(locf_perf) %>% 
     select(method, LM:brier_death)
 
-error1 <- cv_performance %>% 
-    filter(method == "main") %>% 
-    select(-(contains("brier"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    filter(method == "main") %>% 
-    pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
-    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>% 
-    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Main Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 5 years", 
-         y = "Error Rate (%)") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) 
+cv_performance <- cv_performance %>% 
+    summarise(across(error_eskd:brier_death, \(x) confidence_interval (x, 0.95)),
+              .by = c("method", "LM")) %>% 
+    unnest_wider(error_eskd:brier_death, names_sep = "_")
 
-error2 <- cv_performance %>% 
-    filter(method == "sens") %>% 
-    select(-(contains("brier"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>%
-    filter(method == "sens") %>% 
-    pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
-    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>%  
-    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Sensitivity Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 5 years", 
-         y = "Error Rate (%)") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+cv_performance <- cv_performance %>% 
+    pivot_longer(cols = error_eskd_mean:brier_death_upper,
+                 names_to = "performance", 
+                 values_to = "values") %>% 
+    separate_wider_delim(cols = performance, delim = "_",
+                         names = c("metrics", "event", "stats")) %>% 
+    pivot_wider(names_from = stats, 
+                values_from = values)
 
-error1 + error2 + plot_annotation(
-    title = "Comparison Main vs Sensitivity Analysis Approach"
-)
+error <- cv_performance %>% 
+    filter(metrics == "error")
 
-brier1 <- cv_performance %>% 
-    filter(method == "main") %>% 
-    select(-(contains("error"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    filter(method == "main") %>% 
-    pivot_longer(cols = c("brier_eskd", "brier_death"),
-                 names_to = "brier") %>% 
-    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
-                          labels = c("ESKD", "Death"))) %>%    
-    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Main Integrated Brier Score per Landmark with LOCF Prediction Horizon 5 years",
-         y = "Brier Score") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") +
-    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+error %>% 
+    group_by(event) %>% gt()
 
-brier2 <- cv_performance %>% 
-    filter(method == "sens") %>% 
-    select(-(contains("error"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    filter(method == "sens") %>% 
-    pivot_longer(cols = c("brier_eskd", "brier_death"),
-                 names_to = "brier") %>% 
-    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
-                          labels = c("ESKD", "Death"))) %>%    
-    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Sensitivity Integrated Brier Score per Landmark with LOCF Prediction Horizon 5 years",
-         y = "Brier Score") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") +
-    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+error1 <- create_error_graph(error, "main",
+                             "Main Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 5 years")
 
-brier1 + brier2 + plot_annotation(
-    title = "Comparison Main vs Sensitivity Analysis Approach"
-)
+error2 <- create_error_graph(error, "sens",
+                             "Sensitivity Error Rate (1 - Harrell's C-index) per Landmark with LOCF Prediction Horizon 5 years")
+
+error1 + error2 + 
+    plot_annotation(title = "Comparison Main vs Sensitivity Analysis Approach", 
+                    theme = theme(plot.title = element_text(hjust = 0.5))) 
+
+brier <- cv_performance %>% 
+    filter(metrics == "brier")
+
+brier %>% 
+    group_by(event) %>% gt()
+
+brier1 <- create_brier_graph(brier, "main",
+                             "Main Integrated Brier Score per Landmark with LOCF Prediction Horizon 5 years")
+
+brier2 <- create_brier_graph(brier, "sens",
+                             "Sensitivity Integrated Brier Score per Landmark with LOCF Prediction Horizon 5 years")
+
+brier1 + brier2 + 
+    plot_annotation(title = "Comparison Main vs Sensitivity Analysis Approach", 
+                    theme = theme(plot.title = element_text(hjust = 0.5))) 
 
 # end ---------------------------------------------------------------------

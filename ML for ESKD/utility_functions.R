@@ -304,6 +304,92 @@ cross_val_performance_locf_map <- function(train_dt, test_dt, longi_cov,
     model_performance
 }
 
+cross_val_vimp_locf_map <- function(train_dt, test_dt, longi_cov, 
+                                    base_cov, ...){
+    long_train <- train_dt %>%
+        select(id, relyear, !!longi_cov)
+    
+    ## imputing covariates at relyear == 0   
+    impute_dt <- long_train %>% 
+        filter(relyear == 0)
+    
+    temp_dt <- mice(impute_dt, m = 1, maxit = 50, method = "pmm", seed = seed)
+    impute_dt <- complete(temp_dt)
+    
+    train_dt <- impute_dt %>% 
+        bind_rows(long_train) %>% 
+        arrange(id) %>% 
+        distinct(id, relyear, .keep_all = TRUE) %>%
+        group_by(id) %>%
+        fill(!!longi_cov) %>% 
+        ungroup() %>% 
+        left_join(select(train_dt, id:status_compete_num),
+                  by = c("id", "relyear")) %>% 
+        arrange(id, relyear) %>% 
+        as.data.table()
+    
+    test_dt <- test_dt %>% 
+        group_by(id) %>% 
+        fill(!!longi_cov) %>% 
+        ungroup() %>% 
+        as.data.table()
+    
+    train_super_dt <- NULL
+    
+    for (i in seq_along(landmark)) {
+        temp <- cutLM(data = train_dt, outcome = list(time = "time_compete",
+                                                      status = "status_compete_num"),
+                      LM = landmark[i], horizon = landmark[i] + predict_horizon,
+                      covs = list(fixed = base_cov, varying = longi_cov),
+                      format = "long", id = "id", rtime = "relyear", 
+                      right = FALSE) 
+        train_super_dt <- rbind(train_super_dt, temp)
+    }
+    
+    test_super_dt <- NULL
+    
+    for (i in seq_along(landmark)) {
+        temp <- cutLM(data = test_dt, outcome = list(time = "time_compete",
+                                                     status = "status_compete_num"),
+                      LM = landmark[i], horizon = landmark[i] + predict_horizon,
+                      covs = list(fixed = base_cov, varying = longi_cov),
+                      format = "long", id = "id", rtime = "relyear", 
+                      right = FALSE) 
+        test_super_dt <- rbind(test_super_dt, temp)
+    }
+    
+    model_vimp <- NULL
+    
+    for (lmx in landmark){
+        print(glue::glue("Processing landmark: {lmx}"))
+        
+        train_lm <- train_super_dt %>% 
+            filter(LM == lmx)
+        
+        test_lm <- test_super_dt %>% 
+            filter(LM == lmx) %>% 
+            drop_na()
+        
+        model_formula <- as.formula(str_c("Surv(time_compete, status_compete_num)",
+                                          str_c(c(base_cov, longi_cov), collapse = " + "), 
+                                          sep = "~"))
+        
+        tune_rsf <- tune.rfsrc(model_formula, data = train_lm, 
+                               ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)))
+        
+        rsf_model <- rfsrc(formula = model_formula, data = train_lm, ntree = 1000, 
+                           splitrule = "logrankCR", importance = TRUE, statistics = TRUE, 
+                           mtry = tune_rsf$optimal[[2]], nodesize = tune_rsf$optimal[[1]])
+        
+        vimp_temp <- data.table(LM = lmx,
+                                event = c("eskd", "death"))
+        
+        vimp_temp <- cbind(vimp_temp, 100*t(rsf_model$importance))
+        model_vimp <- rbind(model_vimp, vimp_temp)
+    }
+    model_vimp
+}
+
 create_lme_formula <- function(y_name, baseline_covariates){
     lme_formula <- as.formula(str_c({{y_name}},
                                     str_c(c("relyear", baseline_covariates), collapse = " + "),
@@ -706,6 +792,63 @@ cross_val_performance_lmepoly_map <- function(train_dt, test_dt, longi_cov,
     model_performance
 }
 
+confidence_interval <- function(vector, interval) {
+    vec_sd <- sd(vector)
+    n <- length(vector)
+    vec_mean <- mean(vector)
+    error <- qt((interval + 1)/2, df = n - 1) * vec_sd / sqrt(n)
+    result <- c("mean" = vec_mean, 
+                "lower" = vec_mean - error, 
+                "upper" = vec_mean + error)
+    final_result <- list(result)
+}
+
+create_error_graph <- function(dt, method, title){
+    error <- dt %>% 
+        filter(method == !!method) %>% 
+        mutate(LM = factor(LM),
+               event = factor(event, levels = c("eskd", "death"), 
+                              labels = c("ESKD", "Death"))) %>% 
+        ggplot(mapping = aes(x= event, y = mean, color = event)) + 
+        geom_point() + 
+        geom_pointrange(mapping = aes(ymin = lower, ymax = upper), stat = "identity") +
+        facet_grid(~ LM) + 
+        scale_color_manual(values = c("blue", "red")) + 
+        labs(title = title,
+             y = "Error Rate (%)") + 
+        theme_bw() + theme(plot.title = element_text(hjust = 0.5), 
+                           axis.text.x = element_text(size = 12),
+                           axis.title.x = element_blank(),
+                           axis.title.y = element_text(size = 15),
+                           axis.text.y = element_text(size = 10),
+                           legend.title = element_blank(),
+                           legend.position = "none") + 
+        scale_y_continuous(breaks = seq(0, 20, 5), limits = c(0,25))
+}
+
+create_brier_graph <- function(dt, method, title){
+    brier <- dt %>% 
+        filter(method == !!method) %>% 
+        mutate(LM = factor(LM),
+               event = factor(event, levels = c("eskd", "death"), 
+                              labels = c("ESKD", "Death"))) %>% 
+        ggplot(mapping = aes(x= event, y = mean, color = event)) + 
+        geom_point() + 
+        geom_pointrange(mapping = aes(ymin = lower, ymax = upper), stat = "identity") +
+        facet_grid(~ LM) + 
+        scale_color_manual(values = c("blue", "red")) + 
+        labs(title = title,
+             y = "Brier Score") + 
+        theme_bw() + theme(plot.title = element_text(hjust = 0.5),
+                           axis.title.x = element_blank(),
+                           axis.text.x = element_text(size = 12),
+                           axis.title.y = element_text(size = 15),
+                           axis.text.y = element_text(size = 10),
+                           legend.title = element_blank(),
+                           legend.position = "none") + 
+        scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06))
+}
+
 final_models <- function(dt, longi_cov, base_cov, model_name, ...){
     long_dt <- dt %>%
         select(id, relyear, !!longi_cov)
@@ -819,8 +962,6 @@ predicted_cif <- function(landmark_dt, landmark, base_cov, longi_cov,
 }
 
 
-
-
 predicted_cif_model_loaded <- function(landmark_dt, landmark, base_cov, 
                                        longi_cov, ...){
     # need to all load model first as a list into model  
@@ -844,109 +985,4 @@ predicted_cif_model_loaded <- function(landmark_dt, landmark, base_cov,
     cif_dt
 }
 
-extract_cif_feature <- function(outcome_dt, train_test_dt, outcome){
-    temp <- train_test_dt %>% 
-        arrange(id, relyear) %>% 
-        group_by(id, relyear) %>%
-        summarise(mean_cif = 100*mean(cif), .groups = "keep") %>% 
-        ungroup() %>% 
-        group_by(id) %>% 
-        mutate(relyear_before = lag(relyear),
-               mean_cif_before = lag(mean_cif),
-               slope = (mean_cif - mean_cif_before)/(relyear - relyear_before),
-               slope_before = lag(slope),
-               delta_slope = (slope - slope_before)) %>% 
-        mutate(max_slope = max(slope, na.rm = TRUE),
-               max_delta = max(delta_slope, na.rm = TRUE),
-               max_cif = max(mean_cif, na.rm = TRUE)) %>% 
-        slice_max(order_by = slope) %>% 
-        distinct(id, .keep_all = TRUE) %>% 
-        rename(cif_atmaxslope = mean_cif) %>% 
-        select(id, cif_atmaxslope, max_slope:max_cif) %>% 
-        ungroup()
-    
-    cif_atmaxdelta <- train_test_dt %>% 
-        arrange(id, relyear) %>% 
-        group_by(id, relyear) %>%
-        summarise(mean_cif = 100*mean(cif), .groups = "keep") %>% 
-        ungroup() %>% 
-        group_by(id) %>% 
-        mutate(relyear_before = lag(relyear),
-               mean_cif_before = lag(mean_cif),
-               slope = (mean_cif - mean_cif_before)/(relyear - relyear_before),
-               slope_before = lag(slope),
-               delta_slope = (slope - slope_before)) %>% 
-        slice_max(order_by = delta_slope) %>% 
-        distinct(id, .keep_all = TRUE) %>% 
-        rename(cif_atmaxdelta = mean_cif) %>% 
-        pull(cif_atmaxdelta)
-    
-    temp <- temp %>% 
-        mutate(cif_atmaxdelta = cif_atmaxdelta) %>% 
-        left_join(y = select(outcome_dt, id, time_compete, status_compete)) %>% 
-        distinct(id, .keep_all = TRUE) %>% 
-        mutate(event = if_else(
-            condition = time_compete <= 8 & status_compete == !!outcome,
-            true = "yes",
-            false = "no"),
-        event = as.factor(event))
-        # select(-(time_compete:status_compete))
-    
-    temp
-}
 
-# mean_cif_youden <- cutpointr(train_eskd_cif, mean_cif, event, direction = ">=",
-#                              pos_class = "yes", neg_class = "no",
-#                              method = maximize_metric, metric = youden, 
-#                              boot_runs = 100)
-# 
-# mean_cif_youden %>% add_metric(list(ppv,npv))
-# 
-# mean_cif_mcc <- cutpointr(train_eskd_cif, mean_cif, event, direction = ">=",
-#                           pos_class = "yes", neg_class = "no",
-#                           method = maximize_metric, metric = mcc,
-#                           boot_runs = 100)
-# mean_cif_mcc %>% add_metric(list(ppv, npv))
-# 
-# slope_youden <- cutpointr(train_eskd_cif, slope, event, direction = ">=",
-#                           pos_class = "yes", neg_class = "no",
-#                           method = maximize_metric, metric = youden, 
-#                           boot_runs = 100, na.rm = TRUE)
-# 
-# slope_mcc <- cutpointr(train_eskd_cif, slope, event, direction = ">=",
-#                        pos_class = "yes", neg_class = "no",
-#                        method = maximize_metric, metric = mcc, 
-#                        boot_runs = 100, na.rm = TRUE)
-
-
-# rocr_prediction <- prediction(model_prediction, train_eskd_cif$event)
-# perf_prec <- performance(rocr_prediction, "prec", x.measure = "cutoff")
-# perf_rec <- performance(rocr_prediction, "rec", x.measure = "cutoff")
-# perf <- performance(rocr_prediction, "prec", "rec")
-# best.sum <- which.max(perf_prec@y.values[[1]]+perf_rec@y.values[[1]])
-# close.intersection <- which.min(abs(perf_prec@y.values[[1]]-perf_rec@y.values[[1]]))
-# 
-# plotdata <- data.frame(x = perf@x.values[[1]],
-#                        y = perf@y.values[[1]], 
-#                        p = perf@alpha.values[[1]])
-# 
-# perf@alpha.values[[1]][best.sum]
-# perf@alpha.values[[1]][close.intersection]
-# 
-# plot1 <- ggplot(data = plotdata) +
-#     geom_path(aes(x = x, y = y)) + xlab(perf@x.name) + ylab(perf@y.name) + 
-#     theme_bw() + labs(title = "ESKD Precision-Recall for Mean CIF, Slope, and Delta Slope Model 5y only")
-# 
-# plot1 + 
-#     geom_point(data = plotdata[close.intersection, ], aes(x = x, y = y), 
-#                col = "red") + 
-#     annotate("text", 
-#              x = plotdata[close.intersection, ]$x + 0.1,
-#              y = plotdata[close.intersection, ]$y,
-#              label = paste("p =", round(plotdata[close.intersection, ]$p, 3))) + 
-#     geom_point(data = plotdata[best.sum, ], aes(x = x, y = y), 
-#                col = "red") + 
-#     annotate("text", 
-#              x = plotdata[best.sum, ]$x + 0.1,
-#              y = plotdata[best.sum, ]$y,
-#              label = paste("p =", round(plotdata[best.sum, ]$p, 3)))

@@ -1,5 +1,4 @@
 # setup -------------------------------------------------------------------
-
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
                "dynpred", "prodlim", "randomForestSRC", "pec", 
                "gtsummary","purrr", "patchwork", "gt")
@@ -50,6 +49,149 @@ experiment_dt <- experiment_dt %>%
     mutate(train_dt = pmap(list(dt, splits), extract_train_dt),
            test_dt = pmap(list(dt, splits), extract_test_dt)) %>% 
     select(id_name:longi_cov, train_dt, test_dt)
+
+
+# experiment_starts -------------------------------------------------------
+
+dt1 <- experiment_dt$train_dt[[1]]
+dt1$type <- "train"
+dt2 <- experiment_dt$test_dt[[1]]
+dt2$type <- "test"
+
+combined_dt <- rbind(dt1, dt2)
+
+combined_dt %>% 
+    filter(relyear == 0) %>% 
+    select(sex:gn_cat, time_compete:status_compete, !!longi_cov_full, type) %>%
+    tbl_summary(by = type) %>% add_p()
+
+dt <- experiment_dt$train_dt[[1]]
+test_dt <- experiment_dt$test_dt[[1]]
+
+long_dt <- dt %>%
+    select(id, relyear, !!longi_cov_full)
+
+impute_dt <- long_dt %>%
+    filter(relyear == 0)
+
+temp_dt <- mice(impute_dt, m = 1, maxit = 50, method = "pmm", seed = seed)
+impute_dt <- complete(temp_dt)
+
+dt <- impute_dt %>%
+    bind_rows(long_dt) %>%
+    arrange(id) %>%
+    distinct(id, relyear, .keep_all = TRUE) %>%
+    group_by(id) %>%
+    fill(!!longi_cov_full) %>%
+    ungroup() %>%
+    left_join(select(dt, id:status_compete_num),
+              by = c("id", "relyear")) %>%
+    arrange(id, relyear) %>%
+    as.data.table()
+
+super_dt <- NULL
+
+for (i in seq_along(landmark)) {
+    temp <- cutLM(data = dt, outcome = list(time = "time_compete",
+                                            status = "status_compete_num"),
+                  LM = landmark[i], horizon = landmark[i] + predict_horizon,
+                  covs = list(fixed = base_cov_full, varying = longi_cov_full),
+                  format = "long", id = "id", rtime = "relyear",
+                  right = FALSE)
+    super_dt <- rbind(super_dt, temp)
+}
+
+test_dt <- test_dt %>% 
+    group_by(id) %>% 
+    fill(!!longi_cov_full) %>% 
+    ungroup() %>% 
+    as.data.table()
+
+test_super_dt <- NULL
+
+for (i in seq_along(landmark)) {
+    temp <- cutLM(data = test_dt, outcome = list(time = "time_compete",
+                                                 status = "status_compete_num"),
+                  LM = landmark[i], horizon = landmark[i] + predict_horizon,
+                  covs = list(fixed = base_cov_full, varying = longi_cov_full),
+                  format = "long", id = "id", rtime = "relyear", 
+                  right = FALSE) 
+    test_super_dt <- rbind(test_super_dt, temp)
+}
+
+
+lmx <- 1
+dt_lm <- super_dt %>%
+    filter(LM == lmx)
+
+test_lm <- test_super_dt %>% 
+    filter(LM == lmx) %>% 
+    drop_na()
+
+test_lm_nodeath <- test_lm %>% 
+    filter(status_compete_num != 2)
+
+model_formula <- as.formula(str_c("Surv(time_compete, status_compete_num)",
+                                  str_c(c(base_cov_full, longi_cov_full), collapse = " + "),
+                                  sep = "~"))
+
+tune_rsf <- tune.rfsrc(model_formula, data = dt_lm,
+                       ntreeTry = 500, nodesizeTry = c(1:9, seq(10, 100, 5)))
+
+tune_matrix <- rbind(tune_matrix, tune_rsf$optimal)
+
+rsf_model <- rfsrc(formula = model_formula, data = dt_lm, ntree = 1000,
+                   splitrule = "logrankCR", importance = FALSE, statistics = FALSE,
+                   mtry = tune_rsf$optimal[[2]], nodesize = tune_rsf$optimal[[1]], 
+                   save.memory = TRUE)
+
+rsf_prediction <- predict.rfsrc(object = rsf_model,
+                                newdata = test_lm, na.action = "na.omit")
+
+brier_eskd <- pec(rsf_model, formula = model_formula, data = test_lm_nodeath,
+                  cause = 1)
+
+brier_death <- pec(rsf_model, formula = model_formula, data = test_lm,
+                   cause = 2)
+    
+
+output_tibble <- tibble(
+    landmark = landmark,
+    nodesize = tune_matrix[,1],
+    mtry = tune_matrix[,2],
+)    
+tune_tibble_name <- str_c(model_name, "locf_tune.rds", sep = "_")
+write_rds(output_tibble, file = tune_tibble_name)
+
+
+
+results_previous <- read_rds("main_dense3_vs_acr3_performance.rds")
+
+error_eskd <- c(10.1596, 13.82450, 13.578645, 15.20753, 13.36848)
+
+confidence_interval <- function(vector, interval) {
+    vec_sd <- sd(vector)
+    n <- length(vector)
+    vec_mean <- mean(vector)
+    error <- qt((interval + 1)/2, df = n - 1) * vec_sd / sqrt(n)
+    result <- c("lower" = vec_mean - error, "upper" = vec_mean + error)
+    return(result)
+}
+
+confidence_interval(error_eskd, 0.95)
+
+
+vimp <- read_rds("dense3_locf_vimp.rds")
+
+
+
+subsample.rfsrc(rsf_model, B = 10)
+
+
+
+
+
+# original_script ---------------------------------------------------------
 
 pwalk(list(experiment_dt$train_dt, experiment_dt$longi_cov, 
                   experiment_dt$base_cov, experiment_dt$id_name),
@@ -121,6 +263,42 @@ summarise_pts_info(test_dt$dt,
 # dynamic plot ------------------------------------------------------------
 
 
+# just_in_case ------------------------------------------------------------
+
+error_bootstrap <- function(rsf_model, data, index){
+    d <- data[index, ]
+    rsf_prediction <- predict.rfsrc(object = rsf_model, 
+                                    newdata = d, na.action = "na.omit")
+    error_temp <- unname(apply(rsf_prediction$err.rate, 2, mean, na.rm = TRUE))
+    return(error_temp)
+}
+
+eskd_brier_bootstrap <- function(rsf_model, model_formula, data, index){
+    d <- data[index, ]
+    brier_eskd <- pec(rsf_model, formula = model_formula, data = d,
+                      cause = 1)
+    return(crps(brier_eskd))
+}
+
+death_brier_bootstrap <- function(rsf_model, model_formula, data, index){
+    d <- data[index, ]
+    brier_death <- pec(rsf_model, formula = model_formula, data = d,
+                       cause = 2)
+    return(crps(brier_death))
+}
+
+error <- boot::boot(data = test_lm, statistic = error_bootstrap,
+                    R = 10, rsf_model = rsf_model)
+
+boot::boot.ci(error, type = "norm", index = 2)
+
+results_eskd_brier <- boot::boot(data = test_lm, statistic = eskd_brier_bootstrap,
+                                 R = 10, rsf_model = rsf_model, 
+                                 model_formula = model_formula)
+
+results_death_brier <- boot::boot(data = test_lm, statistic = death_brier_bootstrap,
+                                  R = 10, rsf_model = rsf_model, 
+                                  model_formula = model_formula)
 
 
 
