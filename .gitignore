@@ -12,6 +12,7 @@ dask-worker-space
 *.json
 *.png
 *.pdf
+*.Rmd
 
 ML for ESKD/*.gz
 ML for ESKD/*.xlsx
@@ -26,4 +27,6 @@ script/
 .ipynb_checkpoints/
 .vscode/
 
-preparing_paper.R
+experiment.R
+utility_functions_for_WA.R
+backup_utility.R

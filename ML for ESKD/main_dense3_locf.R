@@ -20,9 +20,6 @@ longi_cov_top10 <- c("albumin", "alkphos", "bicarb", "chloride", "egfr",
                      "haemoglobin", "platelet",
                      "potassium", "sodium", "wcc")
 
-longi_cov_top6 <- c("albumin", "bicarb", "chloride", "egfr", "haemoglobin", 
-                    "sodium") 
-
 longi_cov_top5 <- c("albumin", "bicarb", "chloride", "egfr", "haemoglobin")
 base_cov_full <- c("sex", "age_init", "gn_fct")
 base_cov_reduced <- c("age_init")
@@ -33,8 +30,8 @@ source("utility_functions.R")
 
 dense3_dt <- tibble(
     dt_path = "main_dense3_dt.rds",
-    base_cov = list(base_cov_reduced, base_cov_reduced, base_cov_reduced),
-    longi_cov = list(longi_cov_top10, longi_cov_top6, longi_cov_top5)
+    base_cov = list(base_cov_reduced, base_cov_reduced),
+    longi_cov = list(longi_cov_top10, longi_cov_top5)
 )
 
 dense3_dt <- dense3_dt %>% 
@@ -48,7 +45,7 @@ dense3_dt <- dense3_dt %>%
     bind_rows() %>% 
     bind_cols(dense3_dt) %>% 
     select(id, base_cov, longi_cov, dt, splits) %>% 
-    mutate(id_name = rep(c("top10", "top6", "top5"), each = 5)) %>% 
+    mutate(id_name = rep(c("top10", "top5"), each = 5)) %>% 
     mutate(id = str_to_lower(id))
 
 dense3_dt <- dense3_dt %>% 
@@ -68,189 +65,117 @@ write_rds(dense3_dt, "main_dense3_locf_exploration_performance.rds")
 main_dt <- read_rds("main_dense3_vs_acr3_performance.rds")
 dense3_dt <- read_rds("main_dense3_locf_exploration_performance.rds")
 
+main_dt <- main_dt %>% 
+    filter(id_name == "dense3") %>% 
+    rename("method" = "id_name")
+
 locf_perf <- main_dt %>% 
     unnest_longer(locf_perf) %>% 
     select(locf_perf) %>% 
     map(~.x) %>% 
     bind_rows() 
 
-dense3_acr3_locf_performance <- main_dt %>% 
+dense3_locf_performance <- main_dt %>% 
     unnest_longer(locf_perf) %>% 
-    select(id_name) %>% 
+    select(method) %>% 
     bind_cols(locf_perf)
 
-error1 <- dense3_acr3_locf_performance %>% 
-    filter(id_name == "dense3") %>% 
-    select(-(contains("brier"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
-    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>% 
-    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 Error Rate (1 - Harrell's C-index) per Landmark with LOCF 
-         Prediction Horizon 5 years", 
-         y = "Error Rate (%)") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))
+dense3_locf_performance <- dense3_locf_performance %>% 
+    summarise(across(error_eskd:brier_death, \(x) confidence_interval (x, 0.95)),
+              .by = c("LM")) %>% 
+    unnest_wider(error_eskd:brier_death, names_sep = "_")
 
-dense3_locf_perf <- dense3_dt %>% 
+dense3_locf_performance <- dense3_locf_performance %>% 
+    pivot_longer(cols = error_eskd_mean:brier_death_upper,
+                 names_to = "performance", 
+                 values_to = "values") %>% 
+    separate_wider_delim(cols = performance, delim = "_",
+                         names = c("metrics", "event", "stats")) %>% 
+    pivot_wider(names_from = stats, 
+                values_from = values)
+
+dense3_locf_performance <- dense3_locf_performance %>% 
+    mutate(method = "full")
+
+temp <- dense3_dt %>% 
     select(performance) %>% 
     unnest_longer(performance) %>% 
     map(~ .x) %>% 
     bind_rows()
 
-dense3_locf_perf <- dense3_dt %>% 
+dense3_top10or5_performance <- dense3_dt %>% 
     unnest_longer(performance) %>% 
     select(id_name) %>% 
-    bind_cols(dense3_locf_perf)
- 
-error2 <- dense3_locf_perf %>% 
-    filter(id_name == "top10") %>% 
-    select(-(contains("brier"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
-    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>% 
-    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 Top 10 Error Rate (1 - Harrell's C-index) per Landmark 
-         with LOCF Prediction Horizon 5 years", 
-         y = "Error Rate (%)") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30)) 
+    bind_cols(temp) %>% 
+    rename("method" = "id_name")
 
-error3 <- dense3_locf_perf %>% 
-    filter(id_name == "top6") %>% 
-    select(-(contains("brier"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
-    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>% 
-    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 Top 6 Error Rate (1 - Harrell's C-index) per Landmark 
-         with LOCF Prediction Horizon 5 years", 
-         y = "Error Rate (%)") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))  
+dense3_top10or5_performance <- dense3_top10or5_performance %>% 
+    summarise(across(error_eskd:brier_death, \(x) confidence_interval (x, 0.95)),
+              .by = c("method","LM")) %>% 
+    unnest_wider(error_eskd:brier_death, names_sep = "_")
 
-error4 <- dense3_locf_perf %>% 
-    filter(id_name == "top5") %>% 
-    select(-(contains("brier"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("error_eskd", "error_death"),
-                 names_to = "error") %>% 
-    mutate(error = factor(error, levels = c("error_eskd", "error_death"),
-                          labels = c("ESKD", "Death"))) %>% 
-    ggplot(aes(x = error, y = value, fill = error)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 Top 5 Error Rate (1 - Harrell's C-index) per Landmark 
-         with LOCF Prediction Horizon 5 years", 
-         y = "Error Rate (%)") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") + 
-    scale_y_continuous(breaks = seq(0, 30, 5), limits = c(0,30))  
+dense3_top10or5_performance <- dense3_top10or5_performance %>% 
+    pivot_longer(cols = error_eskd_mean:brier_death_upper,
+                 names_to = "performance", 
+                 values_to = "values") %>% 
+    separate_wider_delim(cols = performance, delim = "_",
+                         names = c("metrics", "event", "stats")) %>% 
+    pivot_wider(names_from = stats, 
+                values_from = values)
 
-error1 + error2 + error3 + error4 + plot_annotation(
-    title = "Comparison Dense3 LOCF Models"
-) + plot_layout(ncol = 2, guides = "collect")
+all_dense3_locf_performance <- rbind(dense3_locf_performance, dense3_top10or5_performance)
 
+all_dense3_error <- all_dense3_locf_performance %>% 
+    filter(metrics == "error")
 
-brier1 <- dense3_acr3_locf_performance %>% 
-    filter(id_name == "dense3") %>% 
-    select(-(contains("error"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("brier_eskd", "brier_death"),
-                 names_to = "brier") %>% 
-    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
-                          labels = c("ESKD", "Death"))) %>%    
-    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 Integrated Brier Score per Landmark with LOCF 
-         Prediction Horizon 5 years",
-         y = "Brier Score") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") +
-    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+all_dense3_error %>% 
+    group_by(event) %>% gt()
 
-brier2 <- dense3_locf_perf %>% 
-    filter(id_name == "top10") %>% 
-    select(-(contains("error"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("brier_eskd", "brier_death"),
-                 names_to = "brier") %>% 
-    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
-                          labels = c("ESKD", "Death"))) %>%    
-    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 Top 10 Integrated Brier Score per Landmark with LOCF 
-         Prediction Horizon 5 years",
-         y = "Brier Score") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") +
-    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+error1 <- create_error_graph(all_dense3_error,
+                             method = "full",
+                             "Dense3 Full Model Error Rate (1 - Harrell's C-index) per Landmark LOCF 
+                             Prediction Horizon 5 years")
 
-brier3 <- dense3_locf_perf %>% 
-    filter(id_name == "top6") %>% 
-    select(-(contains("error"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("brier_eskd", "brier_death"),
-                 names_to = "brier") %>% 
-    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
-                          labels = c("ESKD", "Death"))) %>%    
-    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 Top 6 Integrated Brier Score per Landmark with LOCF 
-         Prediction Horizon 5 years",
-         y = "Brier Score") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") +
-    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+error2 <- create_error_graph(all_dense3_error,
+                             method = "top10",
+                             "Dense3 Top 10 Error Rate (1 - Harrell's C-index) per Landmark LOCF 
+                             Prediction Horizon 5 years")
 
-brier4 <- dense3_locf_perf %>% 
-    filter(id_name == "top5") %>% 
-    select(-(contains("error"))) %>% 
-    arrange(LM) %>% 
-    mutate(LM = as_factor(LM)) %>% 
-    pivot_longer(cols = c("brier_eskd", "brier_death"),
-                 names_to = "brier") %>% 
-    mutate(brier = factor(brier, levels = c("brier_eskd", "brier_death"),
-                          labels = c("ESKD", "Death"))) %>%    
-    ggplot(aes(x = brier, y = value, fill = brier)) + geom_boxplot() +
-    facet_grid(~ LM) + scale_fill_manual(values = c("blue", "red")) + 
-    labs(title = "Dense3 Top 5 Integrated Brier Score per Landmark with LOCF 
-         Prediction Horizon 5 years",
-         y = "Brier Score") + 
-    theme_bw() + theme(axis.title.x = element_blank(), 
-                       legend.title = element_blank(),
-                       legend.position = "none") +
-    scale_y_continuous(breaks = seq(0, 0.06, 0.005), limits = c(0, 0.06)) #universal setting
+error3 <- create_error_graph(all_dense3_error,
+                             method = "top5",
+                             "Dense3 Top 5 Error Rate (1 - Harrell's C-index) per Landmark LOCF 
+                             Prediction Horizon 5 years")
 
-brier1 + brier2 + brier3 + brier4 + plot_annotation(
-    title = "Comparison Dense3 LOCF Models"
-) + plot_layout(ncol = 2, guides = "collect")
+error1 + error2 + error3 + plot_annotation(
+    title = "Comparison Dense3 LOCF Models",
+    theme = theme(plot.title = element_text(hjust = 0.5))
+)
 
+all_dense3_brier <- all_dense3_locf_performance %>% 
+    filter(metrics == "brier")
+
+all_dense3_brier %>% 
+    group_by(event) %>% gt()
+
+brier1 <- create_brier_graph(all_dense3_brier,
+                             method = "full",
+                             "Dense3 Full Model Integrated Brier Score per Landmark LOCF
+                             Prediction Horizon 5 years")
+
+brier2 <- create_brier_graph(all_dense3_brier,
+                             method = "top10",
+                             "Dense3 Top 10 Integrated Brier Score per Landmark LOCF
+                             Prediction Horizon 5 years")
+
+brier3 <- create_brier_graph(all_dense3_brier, 
+                             method = "top5",
+                             "Dense3 Top 5 Integrated Brier Score per Landmark LOCF
+                             Prediction Horizon 5 years")
+
+brier1 + brier2 + brier3 + plot_annotation(
+    title = "Comparison Dense3 LOCF Models",
+    theme = theme(plot.title = element_text(hjust = 0.5))
+)
 
 # trained models ----------------------------------------------------------
 

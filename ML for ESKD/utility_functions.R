@@ -7,8 +7,11 @@ library(pec)
 library(rsample)
 library(nlme)
 library(mice)
+library(boot)
+
 
 recovery_check <- function(nested_df){
+    # check whether eGFR < 15 is consistent with ESKD or severe AKI using modality status #
     modality <- nested_df$modality
     # modality <- modality[!duplicated(modality)]
     eskd <- c('Haemodiafiltration', 'Haemofiltration', 'HD', 'PD', 'Nocturnal HD')
@@ -26,6 +29,7 @@ recovery_check <- function(nested_df){
 }
 
 extracting_freq <- function(meta_dt){
+    # count the frequency of the clinicopathological test performed during observation #
     test_names <- meta_dt %>% 
         count(test) %>% 
         pull(test)
@@ -111,6 +115,7 @@ prepare_dt_for_dynamic_plot <- function(dt){
 }
 
 create_folds <- function(dt, seed){
+    # create individual fold for K-fold performance analysis #
     set.seed(seed)
     
     folds <- dt %>% 
@@ -123,7 +128,7 @@ create_folds <- function(dt, seed){
 extract_train_dt <- function(dt, folds_splits){
     temp_dt <- analysis(folds_splits)
     temp_id <- temp_dt$id
-        
+    
     train_dt <- dt %>% 
         filter(id %in% temp_id)
     
@@ -140,22 +145,24 @@ extract_test_dt <- function(dt, folds_splits){
     test_dt
 }
 
-extract_landmark <- function(prepared_dt, ...){
+extract_landmark_for_dynamic_plot <- function(prepared_dt, ...){
     max_test_time <- prepared_dt %>% 
+        filter(relyear <= max(landmark)) %>% 
         slice_max(relyear) %>% 
-        mutate(relyear = plyr::round_any(relyear, 0.5, f = floor)) %>% 
+        mutate(relyear = plyr::round_any(relyear, 0.5, f = ceiling)) %>% 
         pull(relyear)
     
-    if(max_test_time > max(landmark)){
+    if(max_test_time >= max(landmark)){
         landmark <- seq(from = min(landmark), to = max(landmark), by = 0.5)
     } else {
-        landmark <- seq(from = min(landmark), to = max_test_time, 0.5)
+        landmark <- seq(from = min(landmark), to = max_test_time + 0.5, 0.5)
     }
     landmark
 }
 
 extract_landmark_dt <- function(dt, base_cov, longi_cov, landmark, ...){
-    ## external or test data only
+    # external or test data only #
+    # extracting dataset per landmark #
     dt <- dt %>% 
         group_by(id) %>% 
         fill(!!longi_cov) %>% 
@@ -173,7 +180,32 @@ extract_landmark_dt <- function(dt, base_cov, longi_cov, landmark, ...){
 
 performance_landmark_dt <- function(landmark_dt, landmark, base_cov, 
                                     longi_cov, analysis_models, ...){
-    ## external or test data only
+    # external or test data only #
+    # measuring error rate per landmark #
+    landmark_dt <- landmark_dt %>% 
+        drop_na()
+
+    current_dir <- getwd()
+    model_name <- str_c(analysis_models, landmark, "locf_models.gz", sep = "_")
+    model_path <- file.path(current_dir, model_name)
+    rsf_model <- readRDS(model_path)
+    
+    error <- boot::boot(data = landmark_dt, statistic = error_bootstrap,
+                        R = boot_n, rsf_model = rsf_model)
+    
+    error_name <- str_c(analysis_models, landmark, "error.rds", sep = "_")
+    error_path <- file.path(current_dir, error_name)
+    write_rds(error, error_path)
+    
+    performance <- data.table(LM = landmark,
+                              N = nrow(landmark_dt))
+    performance
+}
+
+brier_landmark_dt <- function(landmark_dt, landmark, base_cov, 
+                              longi_cov, analysis_models, ...){
+    # external or test data only #
+    # measuring integrated brier score per landmark #
     landmark_dt <- landmark_dt %>% 
         drop_na()
     
@@ -185,27 +217,22 @@ performance_landmark_dt <- function(landmark_dt, landmark, base_cov,
     model_path <- file.path(current_dir, model_name)
     rsf_model <- readRDS(model_path)
     
-    rsf_prediction <- predict.rfsrc(object = rsf_model,
-                                    newdata = landmark_dt, na.action = "na.omit")
+    brier_eskd <- boot::boot(data = landmark_dt, statistic = brier_bootstrap,
+                             R = boot_n, rsf_model = rsf_model, cause = 1, 
+                             formula = model_formula)
     
-    brier_eskd <- pec(rsf_model, formula = model_formula, data = landmark_dt,
-                      cause = 1)
-    
-    brier_death <- pec(rsf_model, formula = model_formula, data = landmark_dt,
-                       cause = 2)
-    error <- unname(apply(rsf_prediction$err.rate, 2, mean, na.rm = TRUE))
+    brier_name <- str_c(analysis_models, landmark, "brier.rds", sep = "_")
+    brier_path <- file.path(current_dir, brier_name)
+    write_rds(brier_eskd, brier_path)
     
     performance <- data.table(LM = landmark,
-                              N = rsf_prediction$n,
-                              error_eskd = 100 * error[1],
-                              error_death = 100 * error[2],
-                              brier_eskd = crps(brier_eskd)[2],
-                              brier_death = crps(brier_death)[2])
+                              N = nrow(landmark_dt))
     performance
 }
 
 cross_val_performance_locf_map <- function(train_dt, test_dt, longi_cov, 
                                            base_cov, ...){
+    # measuring error rate and integrated brier score for LOCF approach #
     long_train <- train_dt %>%
         select(id, relyear, !!longi_cov)
     
@@ -306,6 +333,7 @@ cross_val_performance_locf_map <- function(train_dt, test_dt, longi_cov,
 
 cross_val_vimp_locf_map <- function(train_dt, test_dt, longi_cov, 
                                     base_cov, ...){
+    # measuring VIMP for LOCF approach #
     long_train <- train_dt %>%
         select(id, relyear, !!longi_cov)
     
@@ -417,6 +445,7 @@ create_lme_model_complex <- function(y_name, baseline_covariates, dataset){
 
 cross_val_performance_lme_map <- function(train_dt, test_dt, longi_cov, 
                                           base_cov, ...){
+    # measuring error rate and integrated brier score for simple LME approach #
     model_list <- vector(mode = "list", length = length(longi_cov))
     
     for (index in seq_along(longi_cov)){
@@ -605,6 +634,7 @@ cross_val_performance_lme_map <- function(train_dt, test_dt, longi_cov,
 
 cross_val_performance_lmepoly_map <- function(train_dt, test_dt, longi_cov,
                                               base_cov, ...){
+    # measuring error rate and integrated brier score for polynomial LME approach #
     model_list <- vector(mode = "list", length = length(longi_cov))
     
     for (index in seq_along(longi_cov)){
@@ -823,7 +853,7 @@ create_error_graph <- function(dt, method, title){
                            axis.text.y = element_text(size = 10),
                            legend.title = element_blank(),
                            legend.position = "none") + 
-        scale_y_continuous(breaks = seq(0, 20, 5), limits = c(0,25))
+        scale_y_continuous(breaks = seq(0, 25, 5), limits = c(0,27))
 }
 
 create_brier_graph <- function(dt, method, title){
@@ -850,6 +880,7 @@ create_brier_graph <- function(dt, method, title){
 }
 
 final_models <- function(dt, longi_cov, base_cov, model_name, ...){
+    # creating trained models with all data for external validation #
     long_dt <- dt %>%
         select(id, relyear, !!longi_cov)
     
@@ -917,6 +948,126 @@ final_models <- function(dt, longi_cov, base_cov, model_name, ...){
     write_rds(output_tibble, file = tune_tibble_name)
 }
 
+# modified_pec <- function(object, formula, data, cause, cens.model="cox"){
+#     histformula <- formula
+#     ipcw.args <- NULL
+#     if (histformula[[2]][[1]] == as.name("Surv")) {
+#         histformula[[2]][[1]] <- as.name("Hist")
+#     }
+#     m <- model.frame(histformula, data, na.action = "na.omit")
+#     response <- model.response(m)
+#     response_dt <- data.table(response[,])
+#     response_dt[, event := fifelse(status == 0, 3, 1, na = 3)]
+#     response <- cbind(response, response_dt$event)
+#     attr(response, "dimnames")[[2]] <- c("time", "status", "event")
+#     model.type <- "competing.risks"
+#     
+#     ProdLimform <- as.formula(update(formula, ".~NULL"))
+#     ProdLimfit <- prodlim::prodlim(formula = ProdLimform, 
+#                                    data = data)
+#     ProdLimfit$call$data <- as.character(substitute(test_lm_nodeath))
+#     ProdLimfit$call$formula = ProdLimform
+#     ProdLimfit$formula <- as.formula(ProdLimfit$formula)
+#     object <- c(list(Reference = ProdLimfit), list(object))
+#     
+#     predictHandlerFun <- "predictEventProb"
+#     NF <- length(object)
+#     neworder <- order(response[, "time"], -response[, "status"])
+#     event <- as.character(response[, "event"])
+#     event <- replace(event, event == "3", "unknown")
+#     event <- event[neworder]
+#     
+#     response <- response[neworder, , drop = FALSE]
+#     Y <- response[, "time"]
+#     status <- response[, "status"]
+#     
+#     data <- data[neworder, ]
+#     unique.Y <- unique(Y)
+#     N <- length(Y)
+#     NU <- length(unique.Y)
+#     maxtime <- unique.Y[NU]
+#     start <- 0
+#     times <- unique(c(start, unique.Y))
+#     times <- times[times <= maxtime]
+#     NT <- length(times)
+#     
+#     if (predictHandlerFun == "predictEventProb") {
+#         iFormula <- as.formula(paste("Surv(itime,istatus)", 
+#                                      "~", as.character(formula)[[3]]))
+#         iData <- data
+#         iData$itime <- response[, "time"]
+#         iData$istatus <- response[, "status"]
+#         ipcw.call <- NULL
+#         ipcw <- ipcw(formula = iFormula, data = iData, method = cens.model, 
+#                      args = ipcw.args, times = times, subjectTimes = Y, 
+#                      subjectTimesLag = 1)
+#         ipcw$dim <-1
+#     }
+#     
+#     AppErr <- lapply(1:NF, function(f) {
+#         fit <- object[[f]]
+#         if (predictHandlerFun == "predictEventProb") {
+#             pred <- do.call(predictHandlerFun, c(list(object = fit, 
+#                                                       newdata = data, times = times, cause = cause)))
+#             if (inherits(x = fit, what = "matrix") || inherits(x = fit, 
+#                                                                what = "numeric")) 
+#                 pred <- pred[neworder, , drop = FALSE]
+#             .C("pecCR", pec = double(NT), as.double(Y), as.double(status), 
+#                as.double(event), as.double(times), as.double(pred), 
+#                as.double(ipcw$IPCW.times), as.double(ipcw$IPCW.subjectTimes), 
+#                as.integer(N), as.integer(NT), as.integer(ipcw$dim), 
+#                as.integer(is.null(dim(pred))), NAOK = TRUE, 
+#                PACKAGE = "pec")$pec
+#         }
+#     })
+#     
+#     names(AppErr) <- c("Reference", "rfsrc")
+#     out <- list(ApprErr = AppErr)
+#     
+#     observed.maxtime <- sapply(out, function(x) {
+#         lapply(x, function(y) {
+#             times[length(y) - sum(is.na(y))]
+#         })
+#     })
+#     minmaxtime <- min(unlist(observed.maxtime))
+#     n.risk <- N - prodlim::sindex(Y, times)
+#     outmodels <- c("Reference", "rfsrc")
+#     
+#     splitMethod <- list(name = "no plan", 
+#                         internal.name = "noPlan",
+#                         k = NULL,
+#                         B = 0,
+#                         M = N,
+#                         N = N)
+#     attr(splitMethod, "class") <- "splitMethod"
+#     
+#     out <- c(out, list(response = model.response(m), 
+#                        time = times, n.risk = n.risk, models = outmodels, maxtime = maxtime, 
+#                        observed.maxtime = observed.maxtime, minmaxtime = minmaxtime, 
+#                        reference = TRUE, start = min(times), cens.model = cens.model, 
+#                        exact = TRUE, splitMethod = splitMethod))
+#     class(out) <- "pec"
+#     out
+# }
+
+brier_bootstrap <- function(rsf_model, data, index, formula, cause){
+    d <- data[index, ]
+    output <- modified_pec(object = rsf_model, 
+                           data = d,
+                           formula = formula,
+                           cause = cause)
+    ibs <- crps(output)[[2]]
+    return(ibs)
+}
+
+error_bootstrap <- function(rsf_model, data, index){
+    d <- data[index, ]
+    rsf_prediction <- predict.rfsrc(object = rsf_model, 
+                                    newdata = d, na.action = "na.omit")
+    error_temp <- unname(apply(rsf_prediction$err.rate, 2, mean, na.rm = TRUE))
+    return(error_temp)
+}
+
 summarise_pts_info <- function(dt, base_cov, longi_cov){
     base_cov <- base_cov %>% 
         pluck(1)
@@ -939,7 +1090,7 @@ summarise_pts_info <- function(dt, base_cov, longi_cov){
 
 predicted_cif <- function(landmark_dt, landmark, base_cov, longi_cov,
                           analysis_models, ...){
-    
+    # measuring CIF for ESKD and Death event #
     model_name <- str_c(analysis_models, landmark, "locf_models.gz", sep = "_")
     rsf_model <- readRDS(model_name)
     
@@ -961,6 +1112,73 @@ predicted_cif <- function(landmark_dt, landmark, base_cov, longi_cov,
     cif_dt
 }
 
+create_dynamic_plot <- function(dt, base_cov, longi_cov, landmark, pred_cif){
+    base_cov_temp <- base_cov %>% 
+        pluck(1) 
+    
+    longi_cov_temp <- longi_cov %>% 
+        pluck(1) 
+    
+    longi_plot <- dt %>% 
+        pluck(1) %>% 
+        filter(relyear <= max(landmark)) %>% 
+        select(relyear, !!base_cov_temp, !!longi_cov_temp) %>% 
+        # drop_na() %>% 
+        pivot_longer(!!longi_cov_temp, 
+                     names_to = "test",
+                     values_to = "value") %>% 
+        ggplot(aes(x = relyear, y = value)) + geom_point() + geom_line() + 
+        theme_bw() + 
+        facet_grid(test ~., switch = "y", scales = "free_y",
+                   labeller = as_labeller(c(albumin = "sAlb", 
+                                            bicarb = "Bicarbonate",
+                                            chloride = "Chloride",
+                                            egfr = "eGFR",
+                                            haemoglobin = "Hb"))) + 
+        coord_cartesian(xlim = c(-0.05,3.05)) +
+        scale_x_continuous(expand = c(0, 0)) +
+        labs(y = NULL, x = NULL) + 
+        theme(strip.text.y.left = element_text(size = 15),
+              axis.text.x = element_text(size = 12),
+              axis.text.y = element_text(size = 10))
+    
+    surv_plot <- pred_cif %>% 
+        bind_rows() %>% 
+        group_by(pred_relyear) %>% 
+        summarise(mean_eskd_cif = mean(eskd_cif),
+                  mean_death_cif = mean(death_cif)) %>% 
+        pivot_longer(cols = -pred_relyear,
+                     names_to = "event",
+                     values_to = "value") %>% 
+        mutate(event = factor(event, 
+                              levels = c("mean_eskd_cif", "mean_death_cif"),
+                              labels = c("ESKD", "Death"))) %>%
+        ggplot(aes(x = pred_relyear, y = value, colour = event)) + geom_line() + 
+        scale_y_continuous(position = "right", labels = scales::label_percent(),
+                           breaks = seq(0, 0.5, 0.1), limits = c(0, 0.55)) +
+        scale_colour_manual(name = "Event CIF", values = c("blue", "red"),
+                            labels = c("ESKD", "Death")) +
+        labs(x = NULL, y = NULL) + 
+        coord_cartesian(xlim = c(3, 8)) + theme_bw() + 
+        scale_x_continuous(expand = c(0, 0), breaks = seq(4,8,1)) +
+        theme(legend.position = c(0.1,0.9),
+              axis.text.x = element_text(size = 12),
+              axis.text.y.right = element_text(size = 15),
+              legend.title = element_text(size = 12),
+              legend.text = element_text(size = 12)) 
+    
+    relyear_lab <- "Time (years)"
+    p_lab <- ggplot() + 
+        annotate(geom = "text", x = 1, y = 1, label = relyear_lab, size = 5) + 
+        coord_cartesian(clip = "off") + theme_void() 
+    
+    dynamic_plot <- (longi_plot | surv_plot) / p_lab + 
+        plot_annotation(title = "Dynamic Plot Prediction") + 
+        plot_layout(heights = c(1,0.01)) & 
+        theme(plot.title = element_text(size = 20, hjust = 0.5))
+    
+    dynamic_plot
+}
 
 predicted_cif_model_loaded <- function(landmark_dt, landmark, base_cov, 
                                        longi_cov, ...){
@@ -984,5 +1202,3 @@ predicted_cif_model_loaded <- function(landmark_dt, landmark, base_cov,
     )
     cif_dt
 }
-
-
