@@ -5,7 +5,7 @@ This repository provides scripts for the article *"Dynamic survival prediction o
 
 ## How to create dynamic prediction plot
 
-![Dynamic_plot Screenshot]()
+![Dynamic_plot Screenshot](https://github.com/daniel-christiadi/eskd_project_112/blob/master/ML%20for%20ESKD/example_eskd.png)
 
 #### Download the models and scripts into in the same folder with dataset
 
