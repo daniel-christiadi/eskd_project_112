@@ -5,6 +5,8 @@ This repository provides scripts for the article *"Dynamic survival prediction o
 
 ## How to create dynamic prediction plot
 
+![Dynamic_plot Screenshot]()
+
 #### Download the models and scripts into in the same folder with dataset
 
 ```http
