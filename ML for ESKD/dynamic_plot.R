@@ -2,7 +2,7 @@
 
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
                "dynpred", "prodlim", "randomForestSRC", "pec", 
-               "gtsummary","purrr", "patchwork", "gt","boot")
+               "gtsummary","purrr", "patchwork", "gt", "assertthat")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 if(length(new.libs)) install.packages(new.libs,repos="http://cran.csiro.au",
@@ -18,30 +18,24 @@ base_cov_reduced <- c("age_init")
 
 source("utility_functions.R")
 
-external_filename <- "experiment_test.rds"
+external_filename <- "experiment_test.rds" #change the file name to the file name that contains the patient for analysis
 
 # dynamic_plot ------------------------------------------------------------
 
 dt <- read_rds(external_filename)
 
-censored_dt <- dt %>% 
-    distinct(id, .keep_all = TRUE) %>% 
-    filter(status_compete == "no")
-
-
-random_test_id <- eskd_dt %>% 
-    distinct(id, .keep_all = TRUE) %>% 
-    slice_sample(n = 1,) %>% 
+id <- dt %>% 
+    distinct(id) %>% 
     pull(id)
 
-random_test_id <- 10719
+assert_that(length(id) == 1) #ensure only one patient per analysis
 
-random_test_dt <- tibble(dt = list(filter(dt, id == random_test_id)),
+graph_dt <- tibble(dt = list(filter(dt, id == id)),
                          base_cov = list(base_cov_reduced),
                          longi_cov = list(longi_cov_top5),
-                         analysis_name = c("experiment_top5"))
+                         analysis_name = c("top5"))
 
-random_test_dt <- random_test_dt %>% 
+graph_dt <- graph_dt %>% 
     mutate(dt = map(dt, prepare_dt_for_dynamic_plot)) %>% 
     mutate(landmark = map(dt, extract_landmark_for_dynamic_plot, landmark)) %>% 
     unnest_longer(landmark) %>% 
@@ -50,14 +44,14 @@ random_test_dt <- random_test_dt %>%
     mutate(pred_cif = pmap(list(lmx_dt, landmark, base_cov, longi_cov, 
                                 analysis_name), predicted_cif, predict_horizon))
 
-summarise_pts_info(random_test_dt$dt, 
-                   base_cov = random_test_dt$base_cov,
-                   longi_cov = random_test_dt$longi_cov)
+summarise_pts_info(graph_dt$dt, 
+                   base_cov = graph_dt$base_cov,
+                   longi_cov = graph_dt$longi_cov)
 
-create_dynamic_plot(dt = random_test_dt$dt,
-                    base_cov = random_test_dt$base_cov,
-                    longi_cov = random_test_dt$longi_cov,
-                    landmark = random_test_dt$landmark,
-                    pred_cif = random_test_dt$pred_cif)
+create_dynamic_plot(dt = graph_dt$dt,
+                    base_cov = graph_dt$base_cov,
+                    longi_cov = graph_dt$longi_cov,
+                    landmark = graph_dt$landmark,
+                    pred_cif = graph_dt$pred_cif)
 
 # end ---------------------------------------------------------------------

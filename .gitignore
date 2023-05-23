@@ -1,10 +1,10 @@
-.Rproj.user
-.Rproj
-.Rhistory
-.RData
-.Ruserdata
-data
-dask-worker-space
+*.Rproj.user
+*.Rproj
+*.Rhistory
+*.RData
+*.Ruserdata
+data/
+dask-worker-space/
 *.gz
 *.RDS
 *.rds
@@ -21,6 +21,7 @@ ML for ESKD/*.csv
 ML for ESKD/*.html
 ML for ESKD/*.txt
 
+
 ml_eskd_new/*
 old_data/
 script/
@@ -30,3 +31,5 @@ script/
 experiment.R
 utility_functions_for_WA.R
 backup_utility.R
+dynamic_plot.Rmd
+.Rproj.user

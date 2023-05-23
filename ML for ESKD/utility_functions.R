@@ -9,7 +9,6 @@ library(nlme)
 library(mice)
 library(boot)
 
-
 recovery_check <- function(nested_df){
     # check whether eGFR < 15 is consistent with ESKD or severe AKI using modality status #
     modality <- nested_df$modality
@@ -947,108 +946,6 @@ final_models <- function(dt, longi_cov, base_cov, model_name, ...){
     tune_tibble_name <- str_c(model_name, "locf_tune.rds", sep = "_")
     write_rds(output_tibble, file = tune_tibble_name)
 }
-
-# modified_pec <- function(object, formula, data, cause, cens.model="cox"){
-#     histformula <- formula
-#     ipcw.args <- NULL
-#     if (histformula[[2]][[1]] == as.name("Surv")) {
-#         histformula[[2]][[1]] <- as.name("Hist")
-#     }
-#     m <- model.frame(histformula, data, na.action = "na.omit")
-#     response <- model.response(m)
-#     response_dt <- data.table(response[,])
-#     response_dt[, event := fifelse(status == 0, 3, 1, na = 3)]
-#     response <- cbind(response, response_dt$event)
-#     attr(response, "dimnames")[[2]] <- c("time", "status", "event")
-#     model.type <- "competing.risks"
-#     
-#     ProdLimform <- as.formula(update(formula, ".~NULL"))
-#     ProdLimfit <- prodlim::prodlim(formula = ProdLimform, 
-#                                    data = data)
-#     ProdLimfit$call$data <- as.character(substitute(test_lm_nodeath))
-#     ProdLimfit$call$formula = ProdLimform
-#     ProdLimfit$formula <- as.formula(ProdLimfit$formula)
-#     object <- c(list(Reference = ProdLimfit), list(object))
-#     
-#     predictHandlerFun <- "predictEventProb"
-#     NF <- length(object)
-#     neworder <- order(response[, "time"], -response[, "status"])
-#     event <- as.character(response[, "event"])
-#     event <- replace(event, event == "3", "unknown")
-#     event <- event[neworder]
-#     
-#     response <- response[neworder, , drop = FALSE]
-#     Y <- response[, "time"]
-#     status <- response[, "status"]
-#     
-#     data <- data[neworder, ]
-#     unique.Y <- unique(Y)
-#     N <- length(Y)
-#     NU <- length(unique.Y)
-#     maxtime <- unique.Y[NU]
-#     start <- 0
-#     times <- unique(c(start, unique.Y))
-#     times <- times[times <= maxtime]
-#     NT <- length(times)
-#     
-#     if (predictHandlerFun == "predictEventProb") {
-#         iFormula <- as.formula(paste("Surv(itime,istatus)", 
-#                                      "~", as.character(formula)[[3]]))
-#         iData <- data
-#         iData$itime <- response[, "time"]
-#         iData$istatus <- response[, "status"]
-#         ipcw.call <- NULL
-#         ipcw <- ipcw(formula = iFormula, data = iData, method = cens.model, 
-#                      args = ipcw.args, times = times, subjectTimes = Y, 
-#                      subjectTimesLag = 1)
-#         ipcw$dim <-1
-#     }
-#     
-#     AppErr <- lapply(1:NF, function(f) {
-#         fit <- object[[f]]
-#         if (predictHandlerFun == "predictEventProb") {
-#             pred <- do.call(predictHandlerFun, c(list(object = fit, 
-#                                                       newdata = data, times = times, cause = cause)))
-#             if (inherits(x = fit, what = "matrix") || inherits(x = fit, 
-#                                                                what = "numeric")) 
-#                 pred <- pred[neworder, , drop = FALSE]
-#             .C("pecCR", pec = double(NT), as.double(Y), as.double(status), 
-#                as.double(event), as.double(times), as.double(pred), 
-#                as.double(ipcw$IPCW.times), as.double(ipcw$IPCW.subjectTimes), 
-#                as.integer(N), as.integer(NT), as.integer(ipcw$dim), 
-#                as.integer(is.null(dim(pred))), NAOK = TRUE, 
-#                PACKAGE = "pec")$pec
-#         }
-#     })
-#     
-#     names(AppErr) <- c("Reference", "rfsrc")
-#     out <- list(ApprErr = AppErr)
-#     
-#     observed.maxtime <- sapply(out, function(x) {
-#         lapply(x, function(y) {
-#             times[length(y) - sum(is.na(y))]
-#         })
-#     })
-#     minmaxtime <- min(unlist(observed.maxtime))
-#     n.risk <- N - prodlim::sindex(Y, times)
-#     outmodels <- c("Reference", "rfsrc")
-#     
-#     splitMethod <- list(name = "no plan", 
-#                         internal.name = "noPlan",
-#                         k = NULL,
-#                         B = 0,
-#                         M = N,
-#                         N = N)
-#     attr(splitMethod, "class") <- "splitMethod"
-#     
-#     out <- c(out, list(response = model.response(m), 
-#                        time = times, n.risk = n.risk, models = outmodels, maxtime = maxtime, 
-#                        observed.maxtime = observed.maxtime, minmaxtime = minmaxtime, 
-#                        reference = TRUE, start = min(times), cens.model = cens.model, 
-#                        exact = TRUE, splitMethod = splitMethod))
-#     class(out) <- "pec"
-#     out
-# }
 
 brier_bootstrap <- function(rsf_model, data, index, formula, cause){
     d <- data[index, ]

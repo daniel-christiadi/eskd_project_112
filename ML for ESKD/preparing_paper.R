@@ -70,6 +70,11 @@ sens3_summary <- sens3_dt %>%
 
 sens3_summary %>% tbl_summary()
 
+dense3_dt %>% 
+    distinct(id, .keep_all = TRUE) %>% 
+    filter(age_init >= 70) %>% 
+    count(status_compete)
+
 # compiling internal performance ------------------------------------------
 
 main_sens_dt <- read_rds("main_vs_sens_performance.rds")
@@ -465,7 +470,7 @@ int_ext_error %>%
 
 # all ns
 int_ext_error %>% 
-    filter(LM == 0.5) %>% 
+    filter(LM == 3) %>% 
     wilcox_test(error ~ method)
 
 int_ext_error %>% 
