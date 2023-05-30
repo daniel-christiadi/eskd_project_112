@@ -9,8 +9,10 @@ This repository provides scripts for the article *"Dynamic survival prediction o
 
 #### Download the models and scripts into in the same folder with dataset
 
+##### Model could be downloaded from 
+
 ```http
-  xxx
+  https://drive.google.com/drive/folders/1yj7McUimsEsYxZjuMG26-oELjY3oMFmf?usp=sharing
 ```
 
 #### Prepare the dataset in person-period format as below
