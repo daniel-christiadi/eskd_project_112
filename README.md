@@ -9,7 +9,7 @@ This repository provides scripts for the article *"Dynamic survival prediction o
 
 #### Download the models and scripts into in the same folder with dataset
 
-##### Model could be downloaded from 
+##### Models could be downloaded from 
 
 ```http
   https://drive.google.com/drive/folders/1yj7McUimsEsYxZjuMG26-oELjY3oMFmf?usp=sharing
