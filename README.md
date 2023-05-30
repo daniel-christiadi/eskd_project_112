@@ -73,5 +73,5 @@ This repository provides scripts for the article *"Dynamic survival prediction o
 
 ## License
 
-[MIT](https://choosealicense.com/licenses/mit/)
+[CC-BY-NC-4.0](LICENSE-CC-BY-NC-4.0.md)
 
