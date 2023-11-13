@@ -5,12 +5,14 @@ This repository provides scripts for the article *"Dynamic survival prediction o
 
 ## How to create dynamic prediction plot
 
-![Dynamic_plot Screenshot]()
+![Dynamic_plot Screenshot](https://github.com/daniel-christiadi/eskd_project_112/blob/master/ML%20for%20ESKD/example_eskd.png)
 
 #### Download the models and scripts into in the same folder with dataset
 
+##### Models could be downloaded from 
+
 ```http
-  xxx
+  https://drive.google.com/drive/folders/1yj7McUimsEsYxZjuMG26-oELjY3oMFmf?usp=sharing
 ```
 
 #### Prepare the dataset in person-period format as below
@@ -73,5 +75,5 @@ This repository provides scripts for the article *"Dynamic survival prediction o
 
 ## License
 
-[MIT](https://choosealicense.com/licenses/mit/)
+[CC-BY-NC-4.0](LICENSE-CC-BY-NC-4.0.md)
 
