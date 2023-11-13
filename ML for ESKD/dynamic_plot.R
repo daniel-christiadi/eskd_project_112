@@ -24,13 +24,16 @@ external_filename <- "experiment_test.rds" #change the file name to the file nam
 
 dt <- read_rds(external_filename)
 
-id <- dt %>% 
+id_interest <- dt %>% 
     distinct(id) %>% 
+    slice_sample(n = 1) %>% 
     pull(id)
 
-assert_that(length(id) == 1) #ensure only one patient per analysis
+assert_that(length(id_interest) == 1) #ensure only one patient per analysis
 
-graph_dt <- tibble(dt = list(filter(dt, id == id)),
+filter(dt, id == id_interest)
+
+graph_dt <- tibble(dt = list(filter(dt, id == id_interest)),
                          base_cov = list(base_cov_reduced),
                          longi_cov = list(longi_cov_top5),
                          analysis_name = c("top5"))
@@ -38,11 +41,12 @@ graph_dt <- tibble(dt = list(filter(dt, id == id)),
 graph_dt <- graph_dt %>% 
     mutate(dt = map(dt, prepare_dt_for_dynamic_plot)) %>% 
     mutate(landmark = map(dt, extract_landmark_for_dynamic_plot, landmark)) %>% 
-    unnest_longer(landmark) %>% 
+    unnest_longer(landmark) %>%  
     mutate(lmx_dt = pmap(list(dt, base_cov, longi_cov, landmark), 
                          extract_landmark_dt, predict_horizon)) %>% 
     mutate(pred_cif = pmap(list(lmx_dt, landmark, base_cov, longi_cov, 
                                 analysis_name), predicted_cif, predict_horizon))
+
 
 summarise_pts_info(graph_dt$dt, 
                    base_cov = graph_dt$base_cov,

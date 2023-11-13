@@ -1099,3 +1099,13 @@ predicted_cif_model_loaded <- function(landmark_dt, landmark, base_cov,
     )
     cif_dt
 }
+
+kfre8_model_2y <- function(age, sex, egfr, log_acr, albumin, phosphate, 
+                          bicarb, calcium){
+    1-0.9629^exp(-0.1848*(age/10-7.036)+0.2906*(sex-0.5642)-0.4156*(egfr/5-7.222)+0.3480*(log_acr-5.137)-0.3569*(albumin-3.997)+0.1582*(phosphate-3.916)-0.01199*(bicarb-25.57)-0.1581*(calcium-9.355))
+}
+
+kfre8_model_5y <- function(age, sex, egfr, log_acr, albumin, phosphate, 
+                          bicarb, calcium){
+    1-0.8636^exp(-0.1848*(age/10-7.036)+0.2906*(sex-0.5642)-0.4156*(egfr/5-7.222)+0.3480*(log_acr-5.137)-0.3569*(albumin-3.997)+0.1582*(phosphate-3.916)-0.01199*(bicarb-25.57)-0.1581*(calcium-9.355))
+}
