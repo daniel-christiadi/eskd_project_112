@@ -72,6 +72,7 @@ This repository provides scripts for the article *"Dynamic survival prediction o
 * skimr 2.1.4
 * tidyverse 2.0.0
 * boot 1.3-28.1
+* timeROC 0.4
 
 ## License
 
