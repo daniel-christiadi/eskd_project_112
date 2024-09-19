@@ -7,6 +7,7 @@ library(pec)
 library(rsample)
 library(nlme)
 library(mice)
+library(timeROC)
 library(boot)
 
 recovery_check <- function(nested_df){
@@ -201,6 +202,31 @@ performance_landmark_dt <- function(landmark_dt, landmark, base_cov,
     performance
 }
 
+tvroc_landmark_dt <- function(landmark_dt, landmark, base_cov, 
+                              longi_cov, analysis_models, ...){
+    # external or test data only #
+    # measuring error rate per landmark #
+    landmark_dt <- landmark_dt %>% 
+        drop_na()
+    
+    current_dir <- getwd()
+    model_name <- str_c(analysis_models, landmark, "locf_models.gz", sep = "_")
+    model_path <- file.path(current_dir, model_name)
+    rsf_model <- readRDS(model_path)
+    
+    d_roc <- boot::boot(data = landmark_dt, statistic = tvroc_bootstrap,
+                        R = boot_n, rsf_model = rsf_model, 
+                        predict_horizon = predict_horizon)
+    
+    roc_name <- str_c(analysis_models, landmark, "roc.rds", sep = "_")
+    roc_path <- file.path(current_dir, roc_name)
+    write_rds(d_roc, roc_path)
+    
+    performance <- data.table(LM = landmark,
+                              N = nrow(landmark_dt))
+    performance
+}
+
 brier_landmark_dt <- function(landmark_dt, landmark, base_cov, 
                               longi_cov, analysis_models, ...){
     # external or test data only #
@@ -228,6 +254,7 @@ brier_landmark_dt <- function(landmark_dt, landmark, base_cov,
                               N = nrow(landmark_dt))
     performance
 }
+
 
 cross_val_performance_locf_map <- function(train_dt, test_dt, longi_cov, 
                                            base_cov, ...){
@@ -964,6 +991,21 @@ error_bootstrap <- function(rsf_model, data, index){
     error_temp <- unname(apply(rsf_prediction$err.rate, 2, mean, na.rm = TRUE))
     return(error_temp)
 }
+
+tvroc_bootstrap <- function(rsf_model, data, index, predict_horizon){
+    d <- data[index, ]
+    rsf_prediction <- predict.rfsrc(object = rsf_model, 
+                                    newdata = d, na.action = "na.omit")
+    roc <- timeROC (T = d$time_compete,
+                    delta = d$status_compete_num,
+                    weighting = "aalen",
+                    marker = rsf_prediction$predicted[,1], cause = 1,
+                    times = predict_horizon)
+    
+    tvroc <- unname(roc$AUC)
+    tvroc
+}
+
 
 summarise_pts_info <- function(dt, base_cov, longi_cov){
     base_cov <- base_cov %>% 

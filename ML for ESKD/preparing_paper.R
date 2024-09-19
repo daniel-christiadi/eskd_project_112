@@ -443,6 +443,62 @@ brier_death %>%
           legend.text = element_text(size = 15)) + 
     scale_y_continuous(breaks = seq(0, 0.07, 0.005), limits = c(0, 0.07))
 
+
+# vimp --------------------------------------------------------------------
+
+locf_vimp <- read_rds("dense3_locf_vimp_new.rds")
+locf_vimp %>% 
+    select(id, vimp) %>% 
+    unnest(vimp) %>% 
+    filter(event == "death") %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_wrap(~ LM) + 
+    labs(title = "Variable Importance LOCF Death Prediction per Landmark",
+         y = "Variable Importance Value") +  
+    theme_bw() + 
+    theme(axis.title.y = element_blank(), 
+          axis.title.x = element_text(size = 13),
+          legend.position = "none",
+          plot.title = element_text(size = 17, hjust = 0.5), 
+          axis.text.x = element_text(size = 11),
+          axis.text.y = element_text(size = 13)) + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 65))
+
+locf_vimp %>% 
+    select(id, vimp) %>% 
+    unnest(vimp) %>% 
+    filter(event == "eskd") %>% 
+    pivot_longer(cols = (sex:wcc), names_to = "covariates") %>% 
+    ggplot(aes(x = fct_reorder(covariates,value), y = value, 
+               fill = covariates)) + 
+    geom_boxplot() + 
+    coord_flip() + 
+    facet_wrap(~ LM) + 
+    labs(title = "Variable Importance LOCF ESKD Prediction per Landmark",
+         y = "Variable Importance Value") +  
+    theme_bw() + 
+    theme(axis.title.y = element_blank(), 
+          axis.title.x = element_text(size = 13),
+          legend.position = "none",
+          plot.title = element_text(size = 17, hjust = 0.5), 
+          axis.text.x = element_text(size = 11),
+          axis.text.y = element_text(size = 13)) + 
+    scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 65))
+    
+
+
+plot.title = element_text(size = 17, hjust = 0.5), 
+axis.text.x = element_text(size = 13),
+axis.title.y = element_text(size = 15),
+axis.title.x = element_blank(),
+axis.text.y = element_text(size = 11),
+legend.title = element_blank(),
+legend.text = element_text(size = 15
+
 # external performance ----------------------------------------------------
 error_temp0.5 <- read_rds("wa_performance/top5_0.5_error.rds")
 error_temp1 <- read_rds("wa_performance/top5_1_error.rds")

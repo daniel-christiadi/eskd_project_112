@@ -2,7 +2,7 @@
 
 libraries <- c("tidyverse", "data.table", "skimr", "nlme", "rsample", 
                "dynpred", "prodlim", "randomForestSRC", "pec", 
-               "purrr", "boot")
+               "purrr", "timeROC", "boot")
 installed <- installed.packages()[,'Package']
 new.libs <- libraries[!(libraries %in% installed)]
 
@@ -23,8 +23,8 @@ base_cov_reduced <- c("age_init")
 
 external_data_file_name <- "experiment_test.rds" #please input file name here!
 analysis_models <- c("top5")
-boot_n <- 5
-source("utility_functions_for_WA.R")
+boot_n <- 999
+source("utility_functions.R")
 
 # performance -------------------------------------------------------------
 
@@ -47,16 +47,17 @@ external_dt <- external_dt %>%
     mutate(lmx_dt = pmap(list(dt, base_cov, longi_cov, landmark), 
                          extract_landmark_dt, predict_horizon))
 
-external_dt <- external_dt %>% 
-    mutate(error = pmap(list(lmx_dt, landmark, base_cov, longi_cov, analysis_models), 
+external_dt <- external_dt %>%
+    mutate(error = pmap(list(lmx_dt, landmark, base_cov, longi_cov, analysis_models),
                         performance_landmark_dt))
 
-external_dt <- external_dt %>% 
+external_dt <- external_dt %>%
     mutate(brier = pmap(list(lmx_dt, landmark, base_cov, longi_cov, analysis_models),
                                  brier_landmark_dt))
 
 external_dt <- external_dt %>% 
-    select(landmark, analysis_models, error, brier)
+    mutate(roc = pmap(list(lmx_dt, landmark, base_cov, longi_cov, analysis_models),
+                      tvroc_landmark_dt))
 
 write_rds(external_dt, "external_performance.rds")
 
