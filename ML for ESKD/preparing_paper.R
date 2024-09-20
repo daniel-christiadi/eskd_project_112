@@ -490,64 +490,83 @@ locf_vimp %>%
     scale_y_continuous(breaks = seq(0, 60, 20), limits = c(-2, 65))
     
 
-
-plot.title = element_text(size = 17, hjust = 0.5), 
-axis.text.x = element_text(size = 13),
-axis.title.y = element_text(size = 15),
-axis.title.x = element_blank(),
-axis.text.y = element_text(size = 11),
-legend.title = element_blank(),
-legend.text = element_text(size = 15
-
 # external performance ----------------------------------------------------
-error_temp0.5 <- read_rds("wa_performance/top5_0.5_error.rds")
-error_temp1 <- read_rds("wa_performance/top5_1_error.rds")
-error_temp1.5 <- read_rds("wa_performance/top5_1.5_error.rds")
-error_temp2 <- read_rds("wa_performance/top5_2_error.rds")
-error_temp2.5 <- read_rds("wa_performance/top5_2.5_error.rds")
-error_temp3 <- read_rds("wa_performance/top5_3_error.rds")
+# error_temp0.5 <- read_rds("wa_performance/top5_0.5_error.rds")
+# error_temp1 <- read_rds("wa_performance/top5_1_error.rds")
+# error_temp1.5 <- read_rds("wa_performance/top5_1.5_error.rds")
+# error_temp2 <- read_rds("wa_performance/top5_2_error.rds")
+# error_temp2.5 <- read_rds("wa_performance/top5_2.5_error.rds")
+# error_temp3 <- read_rds("wa_performance/top5_3_error.rds")
+# 
+# error_temp0.5 <- data.table(error_temp0.5$t)
+# error_temp0.5[, LM := 0.5]
+# error_temp1 <- data.table(error_temp1$t)
+# error_temp1[, LM := 1]
+# error_temp1.5 <- data.table(error_temp1.5$t)
+# error_temp1.5[, LM := 1.5]
+# error_temp2 <- data.table(error_temp2$t)
+# error_temp2[, LM := 2]
+# error_temp2.5 <- data.table(error_temp2.5$t)
+# error_temp2.5[, LM := 2.5]
+# error_temp3 <- data.table(error_temp3$t)
+# error_temp3[, LM := 3]
+# 
+# ext_error <- rbindlist(list(error_temp0.5, error_temp1, 
+#                             error_temp1.5, error_temp2,
+#                             error_temp2.5, error_temp3))
 
-error_temp0.5 <- data.table(error_temp0.5$t)
-error_temp0.5[, LM := 0.5]
-error_temp1 <- data.table(error_temp1$t)
-error_temp1[, LM := 1]
-error_temp1.5 <- data.table(error_temp1.5$t)
-error_temp1.5[, LM := 1.5]
-error_temp2 <- data.table(error_temp2$t)
-error_temp2[, LM := 2]
-error_temp2.5 <- data.table(error_temp2.5$t)
-error_temp2.5[, LM := 2.5]
-error_temp3 <- data.table(error_temp3$t)
-error_temp3[, LM := 3]
+external_performance <- read_rds("external_performance.rds")
+internal_performance <- read_rds("internal_performance.rds")
 
-ext_error <- rbindlist(list(error_temp0.5, error_temp1, 
-                            error_temp1.5, error_temp2,
-                            error_temp2.5, error_temp3))
+internal_cindex <- internal_performance %>%  
+    filter(analysis_models == "top5") %>% 
+    select(LM:error_eskd) %>% 
+    mutate(c_index = 100-error_eskd) %>% 
+    mutate(source = "internal") %>% 
+    select(LM, source, c_index)
 
-ext_error <- ext_error %>% 
-    mutate(method = "external") %>% 
-    mutate(method = factor(method, levels = c("external"), labels = c("External"))) %>% 
-    mutate(event = "eskd") %>% 
-    rename("error" = "V2") %>% 
-    select(LM, method, event, error) %>% 
-    mutate(error = 100*error)
+external_cindex <- external_performance %>% 
+    filter(analysis_models == "top5") %>% 
+    unnest_wider(col = performance) %>% 
+    select(LM, N, error_death) %>% 
+    rename("error_eskd" = "error_death") %>%  
+    mutate(c_index = 100-error_eskd) %>% 
+    mutate(source = "external") %>% 
+    select(LM, source, c_index)
 
-ext_error <- ext_error %>% 
-    mutate(c_index = 100-error)
+int_ext_error <- internal_cindex %>% 
+    bind_rows(external_cindex) %>% 
+    rename("method" = "source")
 
-int_ext_error <- error_eskd %>% 
-    select(LM, data) %>% 
-    unnest(cols = c(data)) %>% 
-    filter(method == "Top 5") %>% 
-    bind_rows(ext_error) 
+# ext_error <- ext_error %>% 
+#     mutate(method = "external") %>% 
+#     mutate(method = factor(method, levels = c("external"), labels = c("External"))) %>% 
+#     mutate(event = "eskd") %>% 
+#     rename("error" = "V2") %>% 
+#     select(LM, method, event, error) %>% 
+#     mutate(error = 100*error)
 
-# all LM pass Levene and Shapiro test
+# ext_error <- ext_error %>% 
+#     mutate(c_index = 100-error)
+
+# int_ext_error <- error_eskd %>% 
+#     select(LM, data) %>% 
+#     unnest(cols = c(data)) %>% 
+#     filter(method == "Top 5") %>% 
+#     bind_rows(ext_error) 
+
+# all LM pass Levene and Shapiro test, but can only perform wilcox test as 
+# external data only has one value per each landmark
+# all non-significant
 int_ext_error %>% 
+    mutate(LM = factor(LM),
+           method = factor(method)) %>% 
     group_by(LM) %>% 
     nest() %>% 
-    mutate(levene = map(data, \(data) levene_test(data, c_index ~ method))) %>% 
-    mutate(shapiro = map(data, \(data) shapiro_test(data$c_index))) %>% 
-    mutate(wilcox = map(data, \(data) wilcox_test(formula = data$c_index ~ data$method)))
+    mutate(levene = map(data, \(data) levene_test(data, c_index ~ method))) %>%
+    mutate(shapiro = map(data, \(data) shapiro_test(data$c_index))) %>%
+    mutate(wilcox = map(data, \(data) wilcox_test(data = data, formula = c_index ~ method))) %>% 
+    unnest(wilcox)
 
 # all ns
 int_ext_error %>% 
@@ -559,9 +578,11 @@ int_ext_error %>%
     get_summary_stats(c_index, type = "quantile") 
 
 int_ext_error %>% 
-    mutate(LM = factor(LM)) %>% 
-    ggplot(mapping = aes(x = LM, y = c_index, fill = method)) + 
-    geom_boxplot() + theme_bw() + 
+    mutate(method = factor(method, 
+                           levels = c("internal", "external"),
+                           labels = c("Internal", "External"))) %>% 
+    ggplot(mapping = aes(x = factor(LM), y = c_index, fill = method)) +
+    geom_boxplot() + theme_bw() +
     ggsci::scale_fill_lancet() + 
     labs(title = "ESKD Harrell's C-index with Prediction Horizon 5 years",
          x = "Landmark Time (years)", y = "C-index (%)",
